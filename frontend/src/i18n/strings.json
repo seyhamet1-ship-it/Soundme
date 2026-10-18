@@ -1,0 +1,162 @@
+{
+  "app_title": {
+    "km": "កម្មវិធីបកសំឡេងវីដេអូជាភាសាខ្មែរ",
+    "en": "Khmer Video Dubber"
+  },
+  "app_subtitle": {
+    "km": "បកប្រែសំឡេងចិន ឬអង់គ្លេស ទៅជាភាសាខ្មែរ",
+    "en": "Translate Chinese or English speech to Khmer"
+  },
+  "upload_heading": {
+    "km": "ជ្រើសរើស ឬអូសវីដេអូមកទីនេះ",
+    "en": "Choose or drop a video"
+  },
+  "source_lang": {
+    "km": "ភាសាដើម",
+    "en": "Source language"
+  },
+  "khmer_voice": {
+    "km": "សំឡេងខ្មែរ",
+    "en": "Khmer voice"
+  },
+  "voice_sreymom": {
+    "km": "ស្រីមុំ · Sreymom",
+    "en": "Sreymom · Female"
+  },
+  "voice_piseth": {
+    "km": "ពិសិដ្ឋ · Piseth",
+    "en": "Piseth · Male"
+  },
+  "preview_voice_btn": {
+    "km": "▶ សាកល្បងសំឡេង",
+    "en": "▶ Preview voice"
+  },
+  "keep_background": {
+    "km": "រក្សាសំឡេងផ្ទៃក្រោយ",
+    "en": "Keep background sound"
+  },
+  "burn_subtitles": {
+    "km": "បង្កប់ចំណងជើងរង",
+    "en": "Burn subtitles"
+  },
+  "review_before_tts": {
+    "km": "ពិនិត្យការបកប្រែមុន",
+    "en": "Review translation before voiceover"
+  },
+  "ownership_notice": {
+    "km": "សូមបង្ហោះតែមាតិកាដែលអ្នកជាម្ចាស់ ឬមានសិទ្ធិប្រើប្រាស់។",
+    "en": "Upload content you have permission to use."
+  },
+  "start_dubbing": {
+    "km": "ចាប់ផ្តើមបកសំឡេង",
+    "en": "Start dubbing"
+  },
+  "processing_heading": {
+    "km": "ដំណើរការ · Processing",
+    "en": "Processing"
+  },
+  "stage_waiting": {
+    "km": "រង់ចាំវីដេអូ",
+    "en": "Waiting for video"
+  },
+  "cancel_btn": {
+    "km": "បោះបង់",
+    "en": "Cancel"
+  },
+  "review_heading": {
+    "km": "ពិនិត្យការបកប្រែ",
+    "en": "Review translation"
+  },
+  "save_and_continue": {
+    "km": "រក្សាទុក ហើយបន្ត",
+    "en": "Save and continue"
+  },
+  "job_history": {
+    "km": "ប្រវត្តិការងារ",
+    "en": "Recent jobs"
+  },
+  "history_empty": {
+    "km": "មិនទាន់មានការងារទេ។",
+    "en": "No jobs yet."
+  },
+  "tts_unavailable": {
+    "km": "មិនអាចបង្កើតសំឡេងខ្មែរបានទេ។ សូមសាកល្បងម្ដងទៀត។",
+    "en": "Unable to synthesize Khmer voice. Please try again."
+  },
+  "processing_failed": {
+    "km": "ដំណើរការមិនបានសម្រេច។ សូមពិនិត្យវីដេអូ ហើយសាកល្បងម្ដងទៀត។",
+    "en": "Processing failed. Please check the video and try again."
+  },
+  "server_restarted": {
+    "km": "ម៉ាស៊ីនមេបានចាប់ផ្ដើមឡើងវិញ។",
+    "en": "Job interrupted by server restart."
+  },
+  "tts_empty_text": {
+    "km": "គ្មានអត្ថបទសម្រាប់បង្កើតសំឡេងទេ។",
+    "en": "No speakable text provided for synthesis."
+  },
+  "no_speech_detected": {
+    "km": "រកមិនឃើញការនិយាយនៅក្នុងវីដេអូទេ។ សូមសាកល្បងវីដេអូដែលមានសំឡេងនិយាយច្បាស់។",
+    "en": "No speech was detected. Try a video with audible speech."
+  },
+  "no_audio_track": {
+    "km": "វីដេអូនេះគ្មានសំឡេងសម្រាប់បកប្រែទេ។",
+    "en": "This video has no audio track to transcribe."
+  },
+  "no_video_stream": {
+    "km": "ឯកសារដែលបានបង្ហោះគ្មានរូបភាពវីដេអូទេ។",
+    "en": "The uploaded file has no video stream."
+  },
+  "file_empty": {
+    "km": "ឯកសារទទេ។ សូមជ្រើសរើសវីដេអូត្រឹមត្រូវ។",
+    "en": "File is empty. Please choose a valid video."
+  },
+  "upload_too_large": {
+    "km": "ទំហំឯកសារលើសពីកម្រិតកំណត់ 4096 MB។",
+    "en": "File exceeds the 4096 MB upload limit."
+  },
+  "invalid_video": {
+    "km": "ទ្រង់ទ្រាយវីដេអូមិនត្រឹមត្រូវ ឬខូច។",
+    "en": "Invalid or corrupted video format."
+  },
+  "duration_too_long": {
+    "km": "រយៈពេលវីដេអូលើសពីកម្រិតកំណត់។",
+    "en": "Video duration exceeds the configured limit."
+  },
+  "disk_space_low": {
+    "km": "ទំហំថាសមិនគ្រប់គ្រាន់សម្រាប់ដំណើរការវីដេអូនេះ។",
+    "en": "Insufficient disk space to process this video."
+  },
+  "long_job_eta": {
+    "km": "ការដំណើរការវីដេអូវែងអាចចំណាយពេលច្រើន។ សូមកុំបិទកម្មវិធី។",
+    "en": "Long video processing may take a while. Please keep the app running."
+  },
+  "default_preview_text": {
+    "km": "សួស្តី។ នេះជាការសាកល្បងសំឡេង។",
+    "en": "Hello. This is a voice test."
+  },
+  "demo_fixture_hello": {
+    "km": "សួស្តីអ្នកទាំងអស់គ្នា សូមស្វាគមន៍មកកាន់ឆានែលរបស់យើង។",
+    "en": "Hello everyone, welcome to our channel."
+  },
+  "demo_fixture_product": {
+    "km": "ថ្ងៃនេះយើងនឹងណែនាំផលិតផលថ្មីមួយ។",
+    "en": "Today we will introduce a new product."
+  },
+  "demo_fixture_price_usd": {
+    "km": "តម្លៃគឺមួយរយម្ភៃដុល្លារ។",
+    "en": "The price is one hundred and twenty dollars."
+  },
+  "demo_fixture_price_cny": {
+    "km": "តម្លៃគឺមួយរយម្ភៃយន់។",
+    "en": "The price is one hundred and twenty yuan."
+  },
+  "demo_review_prefix": {
+    "km": "សូមពិនិត្យ៖ ",
+    "en": "Please review: "
+  },
+  "demo_review_check": {
+    "km": "សូមពិនិត្យការបកប្រែនេះ",
+    "en": "Please review this translation"
+  }
+}

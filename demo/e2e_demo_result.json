@@ -1,0 +1,148 @@
+{
+  "mode": "demo",
+  "env": {
+    "DEMO_MODE": "1",
+    "TTS_PROVIDER": "demo",
+    "TRANSLATION_PROVIDER": "demo"
+  },
+  "started_utc": "2026-10-16T05:56:46Z",
+  "health": {
+    "status": "ok",
+    "ffmpeg": true,
+    "ffprobe": true,
+    "asr": "faster-whisper (loaded on demand)",
+    "translation": "demo",
+    "tts": "auto: Edge TTS -> Azure Speech (if configured) -> MMS; Edge and MMS live probes PASS 2026-10-16",
+    "workers": 2
+  },
+  "job_id": "935419660edb464abb0a5244bcb3f9c4",
+  "timeline": [
+    {
+      "elapsed_s": 0.0,
+      "status": "queued",
+      "stage": "queued",
+      "progress": 0
+    },
+    {
+      "elapsed_s": 1.5,
+      "status": "running",
+      "stage": "transcribe",
+      "progress": 18
+    },
+    {
+      "elapsed_s": 6.0,
+      "status": "completed",
+      "stage": "done",
+      "progress": 100
+    }
+  ],
+  "job": {
+    "id": "935419660edb464abb0a5244bcb3f9c4",
+    "status": "completed",
+    "stage": "done",
+    "progress": 100,
+    "filename": "sample_input.mp4",
+    "source_path": "C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\uploads\\935419660edb464abb0a5244bcb3f9c4\\sample_input.mp4",
+    "options": {
+      "source_lang": "en",
+      "voice": "km-KH-SreymomNeural",
+      "keep_background": false,
+      "burn_subtitles": false,
+      "review_before_tts": false
+    },
+    "started_at": 1792130207.0263028,
+    "detected_language": "en",
+    "outputs": {
+      "video": "dubbed.mp4",
+      "audio": "dub.wav",
+      "srt": "subtitles.srt",
+      "vtt": "subtitles.vtt",
+      "json": "transcript.json"
+    },
+    "providers": {
+      "translation": [
+        "demo-fixture"
+      ],
+      "tts": [
+        "demo-tone-not-speech"
+      ]
+    },
+    "segments": [
+      {
+        "id": 1,
+        "start": 0.0,
+        "end": 2.4,
+        "source_text": "Hello, welcome to SoundMe.",
+        "text_km": "សូមពិនិត្យ៖ Hello, welcome to SoundMe.",
+        "speaker": null
+      },
+      {
+        "id": 2,
+        "start": 2.4,
+        "end": 5.6,
+        "source_text": "This is a short English test sentence for dubbing.",
+        "text_km": "សូមពិនិត្យ៖ This is a short English test sentence for dubbing.",
+        "speaker": null
+      }
+    ],
+    "timings": {
+      "segment_durations": [
+        2.4,
+        3.2
+      ],
+      "processing_seconds": 5.71
+    }
+  },
+  "artifacts": {
+    "dub.wav": 576044,
+    "dubbed.mp4": 147996,
+    "sample_input.mp4": 60768,
+    "source.wav": 191226,
+    "subtitles.srt": 218,
+    "subtitles.vtt": 222,
+    "transcript.json": 781,
+    "voice-0000.wav": 115244,
+    "voice-0001.wav": 153644
+  },
+  "transcript": {
+    "detected_language": "en",
+    "language_probability": 1.0,
+    "mode": "demo-plumbing",
+    "segments": [
+      {
+        "id": 1,
+        "start": 0.0,
+        "end": 2.4,
+        "source_text": "Hello, welcome to SoundMe.",
+        "text_km": "សូមពិនិត្យ៖ Hello, welcome to SoundMe.",
+        "speaker": null
+      },
+      {
+        "id": 2,
+        "start": 2.4,
+        "end": 5.6,
+        "source_text": "This is a short English test sentence for dubbing.",
+        "text_km": "សូមពិនិត្យ៖ This is a short English test sentence for dubbing.",
+        "speaker": null
+      }
+    ],
+    "translation_providers": [
+      "demo-fixture",
+      "demo-fixture"
+    ],
+    "tts_providers": [
+      "demo-tone-not-speech",
+      "demo-tone-not-speech"
+    ]
+  },
+  "downloads": {
+    "video": 200,
+    "audio": 200,
+    "srt": 200,
+    "vtt": 200,
+    "json": 200
+  },
+  "ok": true,
+  "elapsed_s": 6.2,
+  "finished_utc": "2026-10-16T05:56:53Z"
+}

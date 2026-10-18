@@ -1,0 +1,231 @@
+{
+  "generated_utc": "2026-10-18T10:21:24Z",
+  "live": false,
+  "full": false,
+  "checks": [
+    {
+      "name": "compile-app",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 0.2,
+      "output_tail": ""
+    },
+    {
+      "name": "pytest",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 39.3,
+      "output_tail": ".......................................                                  [100%]\n39 passed in 15.41s\njob 6390fb353f3d42eb8deef91f0a02306a failed\nTraceback (most recent call last):\n  File \"C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\app\\providers.py\", line 281, in translate_khmer\n    translated = NllbTranslator().translate(text, source)\n                 ^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\app\\providers.py\", line 87, in __init__\n    NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32).to(\"cpu\")\n                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\transformers\\models\\auto\\auto_factory.py\", line 411, in from_pretrained\n    return model_class.from_pretrained(\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\transformers\\modeling_utils.py\", line 4353, in from_pretrained\n    loading_info, disk_offload_index = cls._load_pretrained_model(\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\transformers\\modeling_utils.py\", line 4498, in _load_pretrained_model\n    loading_info, disk_offload_index = convert_and_load_state_dict_in_model(\n                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\transformers\\core_model_loading.py\", line 1763, in convert_and_load_state_dict_in_model\n    future_or_tensor = spawn_materialize(\n                       ^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\transformers\\core_model_loading.py\", line 1298, in spawn_materialize\n    return thread_pool.submit(_job)\n           ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\concurrent\\futures\\thread.py\", line 173, in submit\n    raise RuntimeError('cannot schedule new futures after '\nRuntimeError: cannot schedule new futures after interpreter shutdown\n\nThe above exception was the direct cause of the following exception:\n\nTraceback (most recent call last):\n  File \"C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\app\\pipeline.py\", line 83, in process_video\n    s.text_km,p=translate_khmer(s.source_text,transcript.language); s.text_km=normalize_numbers(s.text_km); providers.append(p)\n                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\app\\providers.py\", line 283, in translate_khmer\n    raise RuntimeError(f\"NLLB translation failed; no fixture fallback is enabled: {exc}\") from exc\nRuntimeError: NLLB translation failed; no fixture fallback is enabled: cannot schedule new futures after interpreter shutdown\n"
+    },
+    {
+      "name": "mypy",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 6.4,
+      "output_tail": ""
+    },
+    {
+      "name": "frontend-tests",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 6.1,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 test\n> vitest run\n\n\n\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mC:/Users/ASUS ROG G15/OneDrive/Desktop/Soundme/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/App.test.jsx \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[33m 432\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m5 passed\u001b[39m\u001b[22m\u001b[90m (5)\u001b[39m\n\u001b[2m   Start at \u001b[22m 17:19:11\n\u001b[2m   Duration \u001b[22m 3.82s\u001b[2m (transform 170ms, setup 0ms, collect 520ms, tests 432ms, environment 1.36s, prepare 174ms)\u001b[22m\n\n"
+    },
+    {
+      "name": "frontend-lint",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 1.8,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 lint\n> eslint src/App.jsx src/App.test.jsx src/main.jsx\n\n"
+    },
+    {
+      "name": "frontend-build",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 5.7,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 build\n> vite build\n\n\u001b[36mvite v5.4.21 \u001b[32mbuilding for production...\u001b[36m\u001b[39m\ntransforming...\n\u001b[32m✓\u001b[39m 37 modules transformed.\nrendering chunks...\ncomputing gzip size...\n\u001b[2mdist/\u001b[22m\u001b[32mindex.html                                                  \u001b[39m\u001b[1m\u001b[2m  0.55 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  0.35 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-DodaIRJA.woff2  \u001b[39m\u001b[1m\u001b[2m  6.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-D0NTkDRW.woff2  \u001b[39m\u001b[1m\u001b[2m  6.55 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-Bd3ZAoRX.woff   \u001b[39m\u001b[1m\u001b[2m  8.43 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-DTINSare.woff   \u001b[39m\u001b[1m\u001b[2m  8.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-BLI6HyUZ.woff2      \u001b[39m\u001b[1m\u001b[2m 10.62 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DuGo6TL7.woff2      \u001b[39m\u001b[1m\u001b[2m 10.76 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-Dek0CCYB.woff       \u001b[39m\u001b[1m\u001b[2m 13.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DlNc-L-D.woff       \u001b[39m\u001b[1m\u001b[2m 13.59 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-DnqNet9s.woff2      \u001b[39m\u001b[1m\u001b[2m 22.94 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-qwjLDidk.woff2      \u001b[39m\u001b[1m\u001b[2m 24.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-CfhpqDv8.woff       \u001b[39m\u001b[1m\u001b[2m 30.32 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-BUdGgDYy.woff       \u001b[39m\u001b[1m\u001b[2m 32.40 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[35massets/index-D11mGGFZ.css                                   \u001b[39m\u001b[1m\u001b[2m 17.56 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  4.69 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[36massets/index-CQPDkxZD.js                                    \u001b[39m\u001b[1m\u001b[2m236.87 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip: 75.04 kB\u001b[22m\n\u001b[32m✓ built in 4.24s\u001b[39m\n"
+    },
+    {
+      "name": "probe-edge-artifact-real-speech",
+      "ok": true,
+      "evidence": "is_real_speech=True, rms=0.0805, provider=edge-tts"
+    },
+    {
+      "name": "probe-mms-artifact-real-speech",
+      "ok": true,
+      "evidence": "is_real_speech=True, rms=0.1420, provider=mms"
+    },
+    {
+      "name": "providers-has-sanitize-tts",
+      "ok": true,
+      "evidence": "sanitize_text_for_tts present in providers.py"
+    },
+    {
+      "name": "providers-has-edge-lock",
+      "ok": true,
+      "evidence": "asyncio.Lock present on EdgeTTSProvider"
+    },
+    {
+      "name": "providers-has-mms-token-guard",
+      "ok": true,
+      "evidence": "MMS token length guard present"
+    },
+    {
+      "name": "providers-has-vad-fallback",
+      "ok": true,
+      "evidence": "WhisperASR VAD fallback present"
+    },
+    {
+      "name": "i18n-module-exists",
+      "ok": true,
+      "evidence": "app/i18n.py has get_km() and STRINGS dict"
+    },
+    {
+      "name": "orthography-tests-exist",
+      "ok": true,
+      "evidence": "test_orthography.py has Coeng U+17D2 test"
+    },
+    {
+      "name": "frontend-strings-json",
+      "ok": true,
+      "evidence": "strings.json size=6826"
+    },
+    {
+      "name": "khmer-strings-review-md",
+      "ok": true,
+      "evidence": "khmer_strings_review.md size=5621"
+    },
+    {
+      "name": "screenshot/upload-1280.png",
+      "ok": true,
+      "evidence": "102662 bytes"
+    },
+    {
+      "name": "screenshot/upload-375.png",
+      "ok": true,
+      "evidence": "93964 bytes"
+    },
+    {
+      "name": "screenshot/error-1280.png",
+      "ok": true,
+      "evidence": "88021 bytes"
+    },
+    {
+      "name": "screenshot/error-375.png",
+      "ok": true,
+      "evidence": "80825 bytes"
+    },
+    {
+      "name": "screenshot/completed-1280.png",
+      "ok": true,
+      "evidence": "124822 bytes"
+    },
+    {
+      "name": "screenshot/completed-375.png",
+      "ok": true,
+      "evidence": "116608 bytes"
+    },
+    {
+      "name": "screenshot/history-1280.png",
+      "ok": true,
+      "evidence": "124198 bytes"
+    },
+    {
+      "name": "screenshot/history-375.png",
+      "ok": true,
+      "evidence": "115235 bytes"
+    },
+    {
+      "name": "dubbed-en/streams",
+      "ok": true,
+      "evidence": "1v+1a"
+    },
+    {
+      "name": "dubbed-en/duration",
+      "ok": true,
+      "evidence": "|6.000-6.000|=0.000s"
+    },
+    {
+      "name": "dubbed-en/khmer-ratio",
+      "ok": true,
+      "evidence": "2 segs ok"
+    },
+    {
+      "name": "dubbed-en/mode-real",
+      "ok": true,
+      "evidence": "mode=real"
+    },
+    {
+      "name": "dubbed-zh/streams",
+      "ok": true,
+      "evidence": "1v+1a"
+    },
+    {
+      "name": "dubbed-zh/duration",
+      "ok": true,
+      "evidence": "|6.000-6.000|=0.000s"
+    },
+    {
+      "name": "dubbed-zh/khmer-ratio",
+      "ok": true,
+      "evidence": "2 segs ok"
+    },
+    {
+      "name": "dubbed-zh/mode-real",
+      "ok": true,
+      "evidence": "mode=real"
+    },
+    {
+      "name": "idempotency-unit",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 6.9,
+      "output_tail": "...                                                                      [100%]\n3 passed in 0.98s\njob 406c3fdf63dd4ea88267679c836b8a52 failed\nTraceback (most recent call last):\n  File \"C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\app\\pipeline.py\", line 72, in process_video\n    update_job(job_id,stage=\"transcribe\",progress=18); transcript=WhisperASR(os.getenv(\"ASR_MODEL\",\"small\")).transcribe(wav,opts.get(\"source_lang\",\"auto\"))\n                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\app\\providers.py\", line 30, in __init__\n    self.model = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=4)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\faster_whisper\\transcribe.py\", line 139, in __init__\n    model_path = download_model(\n                 ^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\faster_whisper\\utils.py\", line 105, in download_model\n    return huggingface_hub.snapshot_download(repo_id, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\huggingface_hub\\utils\\_validators.py\", line 89, in _inner_fn\n    return fn(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\huggingface_hub\\utils\\_http.py\", line 266, in _inner\n    return fn(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\huggingface_hub\\_snapshot_download.py\", line 532, in snapshot_download\n    hf_thread_map(\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\huggingface_hub\\utils\\tqdm.py\", line 438, in hf_thread_map\n    future_to_index = {executor.submit(fn, item): index for index, item in enumerate(items)}\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\ASUS ROG G15\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\concurrent\\futures\\thread.py\", line 173, in submit\n    raise RuntimeError('cannot schedule new futures after '\nRuntimeError: cannot schedule new futures after interpreter shutdown\n"
+    },
+    {
+      "name": "server-restart-unit",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 2.8,
+      "output_tail": ".                                                                        [100%]\n1 passed in 0.07s\n"
+    },
+    {
+      "name": "playwright-e2e",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 52.9,
+      "output_tail": "\nRunning 5 tests using 1 worker\n\n  ok 1 e2e\\gui.spec.js:24:3 › Soundme GUI evidence — Real Mode › 1. renders the Khmer studio landing state (upload state) (2.7s)\n  ok 2 e2e\\gui.spec.js:32:3 › Soundme GUI evidence — Real Mode › 2. voice preview returns live synthesized audio (10.5s)\n  ok 3 e2e\\gui.spec.js:58:3 › Soundme GUI evidence — Real Mode › 3. TTS_UNAVAILABLE surfaces as an accessible bilingual error (671ms)\n  ok 4 e2e\\gui.spec.js:78:3 › Soundme GUI evidence — Real Mode › 4. failed job cards expose the TTS_UNAVAILABLE code and Khmer message (error state) (745ms)\n  ok 5 e2e\\gui.spec.js:108:3 › Soundme GUI evidence — Real Mode › 5. full upload run reaches completed downloadable Khmer dub (real mode) (31.1s)\n\n  5 passed (50.0s)\n"
+    },
+    {
+      "name": "playwright-edge-breaker",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 34.6,
+      "output_tail": "\nRunning 7 tests using 1 worker\n\n  ok 1 e2e\\edge_and_breaker.spec.js:18:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 1. Double-click & rapid triple-click disables button and creates exactly ONE job (3.7s)\n  ok 2 e2e\\edge_and_breaker.spec.js:58:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 4a. Edge Case: 0-byte file shows clear Khmer error and no orphan job (1.1s)\n  ok 3 e2e\\edge_and_breaker.spec.js:78:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 4b. Edge Case: .txt renamed .mp4 shows clear Khmer error and no orphan job (1.7s)\n  ok 4 e2e\\edge_and_breaker.spec.js:100:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 4c. Edge Case: corrupt mp4 shows clear Khmer error and no orphan job (1.4s)\n  ok 5 e2e\\edge_and_breaker.spec.js:122:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 4d. Edge Case: oversize (>500MB) shows clear Khmer error and no upload (735ms)\n  ok 6 e2e\\edge_and_breaker.spec.js:138:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 4e. Edge Case: no audio track fails gracefully with NO_AUDIO_TRACK and Khmer error (2.7s)\n  ok 7 e2e\\edge_and_breaker.spec.js:161:3 › Soundme Phase 6b: Breaker, Idempotency & Edge Cases › 4f. Edge Case: silent audio fails gracefully with NO_SPEECH_DETECTED and Khmer error (12.9s)\n\n  7 passed (31.1s)\n"
+    },
+    {
+      "name": "cancel-guarantees",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 6.5,
+      "output_tail": "\n--- PROCESS TABLE BEFORE CANCEL ---\nTotal matching procs before cancel: 0\n\n--- PROCESS TABLE AFTER CANCEL ---\nTotal matching procs after cancel: 0\nTemp directory C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\uploads\\0316a553cefd46fcb4b3c4ace55fbd4e successfully cleaned: exists=False\n\nCANCEL LIFECYCLE TEST: ALL ASSERTIONS PASSED\n"
+    },
+    {
+      "name": "playwright-long-job-screenshots",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 10.6,
+      "output_tail": "\nRunning 3 tests using 1 worker\n\n  ok 1 e2e\\long_job_screenshots.spec.js:16:3 › Soundme Long-Job GUI States Evidence › 1. renders ETA and long-job warning (long-eta) (1.1s)\n  ok 2 e2e\\long_job_screenshots.spec.js:55:3 › Soundme Long-Job GUI States Evidence › 2. renders queued state (long-queued) (689ms)\n  ok 3 e2e\\long_job_screenshots.spec.js:87:3 › Soundme Long-Job GUI States Evidence › 3. renders resume after refresh state (long-resume) (726ms)\n\n  3 passed (6.7s)\n"
+    },
+    {
+      "name": "long-pipeline-verification",
+      "ok": true,
+      "returncode": 0,
+      "elapsed_s": 5.2,
+      "output_tail": "\n======================================================================\nSOUNDME LONG-VIDEO VERIFICATION SUITE\n======================================================================\n\nCHECK                                STATUS    DETAIL\n----------------------------------------------------------------------\nfault-injection/resumable-upload     PASS      uploaded 2 chunks, resumed 2 chunks successfully\nstream-count                         PASS      videos=1, audios=1\nduration-delta                       PASS      |6.00s - 6.00s| = 0.000s (max 1.0s)\npeak-amplitude                       PASS      peak=-7.27 dBFS (limit <= -1.0 dBFS)\naudibility-and-real-speech           PASS      audible_ratio=100.0%, is_real_speech=True\nkhmer-script-purity                  PASS      khmer_ratio=91.0%, cjk_chars=0\nsubtitles-monotonic                  PASS      monotonic=True, srt_lines=7\n----------------------------------------------------------------------\nSUMMARY: 7 PASSED, 0 FAILED\n"
+    }
+  ],
+  "passed": 39,
+  "failed": 0,
+  "ok": true
+}

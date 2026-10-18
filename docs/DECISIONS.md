@@ -1,0 +1,7 @@
+# Decisions
+
+- 2026-10-16: Preserve the existing FastAPI/React workspace and local model cache. Do not commit the existing `.env`; `.gitignore` excludes secrets.
+- 2026-10-16: Environment: Windows 11 x64, Python 3.14.3, Node 24.15.0/npm 11.12.1, 16 GB RAM (5.7 GB free at probe), Intel i7-10870H (8 cores), RTX 2060 (4 GB), 53.69 GB free disk. FFmpeg 9.0.2 reports libass, libharfbuzz, and subtitles filter. PyPI/npm/Hugging Face HEAD returned 200. Playwright CDN HEAD returned 400 (browser already cached); Microsoft's Edge voices endpoint returned 404. Actual Edge voice discovery returned Sreymom/Piseth; synthesis failed with WebSocket HTTP 403. Mark live Edge synthesis NOT VERIFIED LIVE.
+- 2026-10-16: Existing local HF cache contains faster-whisper-small and NLLB-200-600M. Prefer these where they actually load. NLLB-200 is CC-BY-NC 4.0 (non-commercial); faster-whisper uses MIT, Whisper weights use Apache-2.0.
+- 2026-10-16: Never silently claim machine translation/speech synthesis when an offline demo fallback was used. Persist provider provenance. If live Edge synthesis is blocked, use deterministic offline speech-like audio only for pipeline demonstration, clearly mark it as a fake, and never claim it is spoken Khmer.
+- 2026-10-16: Khmer UI font uses a locally installed KhmerOS font when available; frontend self-hosted font package is preferred for clean clones. Do not claim visual validation until screenshots are inspected.

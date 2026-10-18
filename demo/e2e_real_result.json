@@ -1,0 +1,166 @@
+{
+  "mode": "real",
+  "env": {
+    "DEMO_MODE": "",
+    "TTS_PROVIDER": "auto",
+    "TRANSLATION_PROVIDER": "nllb"
+  },
+  "started_utc": "2026-10-16T05:54:50Z",
+  "health": {
+    "status": "ok",
+    "ffmpeg": true,
+    "ffprobe": true,
+    "asr": "faster-whisper (loaded on demand)",
+    "translation": "nllb",
+    "tts": "auto: Edge TTS -> Azure Speech (if configured) -> MMS; Edge and MMS live probes PASS 2026-10-16",
+    "workers": 2
+  },
+  "job_id": "bb3022388663467880bd5646e5c99e74",
+  "timeline": [
+    {
+      "elapsed_s": 0.0,
+      "status": "queued",
+      "stage": "queued",
+      "progress": 0
+    },
+    {
+      "elapsed_s": 1.5,
+      "status": "running",
+      "stage": "transcribe",
+      "progress": 18
+    },
+    {
+      "elapsed_s": 9.0,
+      "status": "running",
+      "stage": "translate",
+      "progress": 38
+    },
+    {
+      "elapsed_s": 31.0,
+      "status": "running",
+      "stage": "voice",
+      "progress": 54
+    },
+    {
+      "elapsed_s": 35.5,
+      "status": "running",
+      "stage": "mix",
+      "progress": 82
+    },
+    {
+      "elapsed_s": 37.0,
+      "status": "completed",
+      "stage": "done",
+      "progress": 100
+    }
+  ],
+  "job": {
+    "id": "bb3022388663467880bd5646e5c99e74",
+    "status": "completed",
+    "stage": "done",
+    "progress": 100,
+    "filename": "sample_input.mp4",
+    "source_path": "C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\uploads\\bb3022388663467880bd5646e5c99e74\\sample_input.mp4",
+    "options": {
+      "source_lang": "en",
+      "voice": "km-KH-SreymomNeural",
+      "keep_background": false,
+      "burn_subtitles": false,
+      "review_before_tts": false
+    },
+    "started_at": 1792130091.2148948,
+    "detected_language": "en",
+    "outputs": {
+      "video": "dubbed.mp4",
+      "audio": "dub.wav",
+      "srt": "subtitles.srt",
+      "vtt": "subtitles.vtt",
+      "json": "transcript.json"
+    },
+    "providers": {
+      "translation": [
+        "nllb-local"
+      ],
+      "tts": [
+        "edge-tts"
+      ]
+    },
+    "segments": [
+      {
+        "id": 1,
+        "start": 0.0,
+        "end": 2.4,
+        "source_text": "Hello, welcome to SoundMe.",
+        "text_km": "អរគុណអ្នក ដែលបានមកលេង SoundMe។",
+        "speaker": null
+      },
+      {
+        "id": 2,
+        "start": 2.4,
+        "end": 5.6,
+        "source_text": "This is a short English test sentence for dubbing.",
+        "text_km": "នេះ ជា សម្តី សាកល្បង ភាសា អង់គ្លេស ខ្លី សម្រាប់ ការ ចម្រៀង។",
+        "speaker": null
+      }
+    ],
+    "timings": {
+      "segment_durations": [
+        2.856,
+        3.7247916666666665
+      ],
+      "processing_seconds": 35.65
+    }
+  },
+  "artifacts": {
+    "dub.wav": 576044,
+    "dubbed.mp4": 124101,
+    "sample_input.mp4": 60768,
+    "source.wav": 191226,
+    "subtitles.srt": 305,
+    "subtitles.vtt": 309,
+    "transcript.json": 831,
+    "voice-0000.wav": 137166,
+    "voice-0001.wav": 223566
+  },
+  "transcript": {
+    "detected_language": "en",
+    "language_probability": 1.0,
+    "mode": "real",
+    "segments": [
+      {
+        "id": 1,
+        "start": 0.0,
+        "end": 2.4,
+        "source_text": "Hello, welcome to SoundMe.",
+        "text_km": "អរគុណអ្នក ដែលបានមកលេង SoundMe។",
+        "speaker": null
+      },
+      {
+        "id": 2,
+        "start": 2.4,
+        "end": 5.6,
+        "source_text": "This is a short English test sentence for dubbing.",
+        "text_km": "នេះ ជា សម្តី សាកល្បង ភាសា អង់គ្លេស ខ្លី សម្រាប់ ការ ចម្រៀង។",
+        "speaker": null
+      }
+    ],
+    "translation_providers": [
+      "nllb-local",
+      "nllb-local"
+    ],
+    "tts_providers": [
+      "edge-tts",
+      "edge-tts"
+    ]
+  },
+  "downloads": {
+    "video": 200,
+    "audio": 200,
+    "srt": 200,
+    "vtt": 200,
+    "json": 200
+  },
+  "ok": true,
+  "elapsed_s": 37.9,
+  "finished_utc": "2026-10-16T05:55:28Z"
+}

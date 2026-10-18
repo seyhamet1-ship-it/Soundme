@@ -1,0 +1,400 @@
+import { useEffect, useState } from 'react';
+import strings from './i18n/strings.json';
+
+const A = '/api';
+
+export default function App() {
+  const [en, E] = useState(false);
+  const [file, F] = useState(null);
+  const [source, S] = useState('auto');
+  const [voice, V] = useState('km-KH-SreymomNeural');
+  const [bg, B] = useState(false);
+  const [burn, U] = useState(false);
+  const [review, R] = useState(false);
+  const [pct, P] = useState(0);
+  const [job, J] = useState(null);
+  const [jobs, H] = useState([]);
+  const [err, X] = useState('');
+  const [rows, Q] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [pendingUpload] = useState(() => localStorage.getItem('pendingUploadId'));
+
+  const t = (key) => strings[key]?.[en ? 'en' : 'km'] || key;
+
+  useEffect(() => {
+    let id = localStorage.getItem('activeJob');
+    if (id) J({ id });
+    fetch(A + '/jobs').then((r) => r.json()).then(H).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!job?.id) return;
+    let live = true;
+    const poll = () =>
+      fetch(`${A}/jobs/${job.id}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (!live) return;
+          J(d);
+          if (d.segments) Q(d.segments);
+          if (['completed', 'failed', 'canceled'].includes(d.status)) {
+            localStorage.removeItem('activeJob');
+            fetch(A + '/jobs').then((r) => r.json()).then(H);
+          }
+        })
+        .catch(() => {});
+    poll();
+    let timer = setInterval(poll, 1300);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [job?.id]);
+
+  function pick(f) {
+    X('');
+    if (!f) return;
+    if (!/\.(mp4|mov|m4v|avi|mkv|webm)$/i.test(f.name)) {
+      X(en ? 'Choose an MP4, MOV, MKV, AVI, or WEBM video.' : (t('invalid_video') + ' (Choose an MP4, MOV, MKV, AVI, or WEBM video.)'));
+      return;
+    }
+    if (f.size > 4096e6) {
+      X(en ? 'Maximum upload size is 4096 MB.' : t('upload_too_large'));
+      return;
+    }
+    if (f.size === 0) {
+      X(en ? 'File is empty. Please choose a valid video.' : t('file_empty'));
+      return;
+    }
+    F(f);
+    J(null);
+  }
+
+  async function uploadChunked() {
+    setSubmitting(true);
+    let chunkSize = 5 * 1024 * 1024;
+    let totalChunks = Math.ceil(file.size / chunkSize);
+    let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
+
+    try {
+      let initRes = await fetch(A + '/upload/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, total_size: file.size, chunk_size: chunkSize }),
+      });
+      if (!initRes.ok) {
+        let errData = await initRes.json().catch(() => ({}));
+        setSubmitting(false);
+        X(errData.detail || t('processing_failed'));
+        return;
+      }
+      let { upload_id } = await initRes.json();
+      localStorage.setItem('pendingUploadId', upload_id);
+
+      let stRes = await fetch(`${A}/upload/${upload_id}/status`);
+      let st = await stRes.json();
+      let receivedSet = new Set(st.received_chunks || []);
+
+      for (let i = 0; i < totalChunks; i++) {
+        if (receivedSet.has(i)) continue;
+        let start = i * chunkSize;
+        let end = Math.min(file.size, start + chunkSize);
+        let slice = file.slice(start, end);
+
+        let chunkRes = await fetch(`${A}/upload/${upload_id}/chunk`, {
+          method: 'PUT',
+          headers: { 'X-Chunk-Index': String(i) },
+          body: slice,
+        });
+        if (!chunkRes.ok) throw new Error('Chunk upload failed');
+        P(Math.round(((i + 1) / totalChunks) * 100));
+      }
+
+      let compRes = await fetch(`${A}/upload/${upload_id}/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_lang: source,
+          voice,
+          keep_background: bg,
+          burn_subtitles: burn,
+          review_before_tts: review,
+          idempotency_key: idempotencyKey,
+        }),
+      });
+      setSubmitting(false);
+      localStorage.removeItem('pendingUploadId');
+      if (!compRes.ok) {
+        let errData = await compRes.json().catch(() => ({}));
+        X(errData.detail || t('processing_failed'));
+        return;
+      }
+      let r = await compRes.json();
+      localStorage.setItem('activeJob', r.id);
+      J(r);
+    } catch {
+      setSubmitting(false);
+      X(t('processing_failed'));
+    }
+  }
+
+  function upload() {
+    if (submitting) return;
+    if (!file || file.size === 0) {
+      X(t('file_empty'));
+      return;
+    }
+    if (file.size > 4096e6) {
+      X(t('upload_too_large'));
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      uploadChunked();
+      return;
+    }
+    setSubmitting(true);
+    let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
+    let d = new FormData();
+    d.append('file', file);
+    d.append('source_lang', source);
+    d.append('voice', voice);
+    d.append('keep_background', bg);
+    d.append('burn_subtitles', burn);
+    d.append('review_before_tts', review);
+    let x = new XMLHttpRequest();
+    x.open('POST', A + '/jobs');
+    x.setRequestHeader('Idempotency-Key', idempotencyKey);
+    x.upload.onprogress = (e) => e.lengthComputable && P(Math.round((e.loaded / e.total) * 100));
+    x.onload = () => {
+      setSubmitting(false);
+      if (x.status > 299) {
+        let errDetail;
+        try {
+          let errObj = JSON.parse(x.responseText);
+          errDetail = errObj.detail || x.responseText;
+          if (typeof errDetail === 'object') {
+            errDetail = (en ? errDetail.message_en : errDetail.message_km) || errDetail.code || JSON.stringify(errDetail);
+          }
+        } catch {
+          errDetail = x.responseText || 'Error';
+        }
+        X(errDetail);
+        return;
+      }
+      let r = JSON.parse(x.responseText);
+      localStorage.setItem('activeJob', r.id);
+      J(r);
+    };
+    x.onerror = () => {
+      setSubmitting(false);
+      X(t('processing_failed'));
+    };
+    x.send(d);
+  }
+
+  async function previewVoice() {
+    X('');
+    try {
+      let r = await fetch(A + '/tts/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice }),
+      });
+      if (!r.ok) {
+        let d = await r.json().catch(() => ({}));
+        X(d.detail || 'Voice preview failed.');
+        return;
+      }
+      let url = URL.createObjectURL(await r.blob());
+      new Audio(url).play();
+    } catch {
+      X('Voice preview failed. Server unavailable.');
+    }
+  }
+
+  async function save() {
+    await fetch(`${A}/jobs/${job.id}/segments`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rows),
+    });
+    await fetch(`${A}/jobs/${job.id}/resume`, { method: 'POST' });
+    J({ ...job, status: 'running' });
+  }
+
+  let stages = ['queued', 'transcribe', 'translate', 'voice', 'mix', 'done'];
+  return (
+    <main>
+      <header>
+        <div>
+          <small>SOUNDME · KHMER STUDIO</small>
+          <h1>{t('app_title')}</h1>
+          <p>{t('app_subtitle')}</p>
+        </div>
+        <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
+      </header>
+      <div className="grid">
+        <section className="card">
+          <h2>{t('upload_heading')}</h2>
+          {pendingUpload && (
+            <div className="notice resume-notice" style={{ background: '#e0e7ff', color: '#3730a3', padding: '0.6rem 0.8rem', borderRadius: '0.375rem', marginBottom: '0.75rem', fontSize: '0.875rem', border: '1px solid #c7d2fe' }}>
+              {en ? '🔄 Resumable upload detected from previous session. Select file to resume.' : '🔄 បានរកឃើញការផ្ទុកឡើងដែលអាចបន្តពីមុន។ សូមជ្រើសរើសឯកសារដើម្បីបន្ត។'}
+            </div>
+          )}
+          <label
+            className="drop"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              pick(e.dataTransfer.files[0]);
+            }}
+          >
+            <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
+            <b>＋</b>
+            <strong>{file?.name || t('upload_heading')}</strong>
+            <span>MP4 · MOV · MKV · WEBM · 4096 MB max</span>
+          </label>
+          {file && file.size > 0 && typeof URL.createObjectURL === 'function' && <video className="preview" controls src={URL.createObjectURL(file)} />}
+          <div className="fields">
+            <label>
+              {t('source_lang')}
+              <select value={source} onChange={(e) => S(e.target.value)}>
+                <option value="auto">Auto</option>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </label>
+            <label>
+              {t('khmer_voice')}
+              <select value={voice} onChange={(e) => V(e.target.value)}>
+                <option value="km-KH-SreymomNeural">{t('voice_sreymom')}</option>
+                <option value="km-KH-PisethNeural">{t('voice_piseth')}</option>
+              </select>
+            </label>
+          </div>
+          <button className="secondary" onClick={previewVoice}>
+            {t('preview_voice_btn')}
+          </button>
+          <div className="checks">
+            {[
+              [bg, B, t('keep_background')],
+              [burn, U, t('burn_subtitles')],
+              [review, R, t('review_before_tts')],
+            ].map(([v, set, label]) => (
+              <label key={label}>
+                <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} />
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="notice">{t('ownership_notice')}</p>
+          {bg && (
+            <p className="notice" style={{ fontSize: '0.75rem', marginTop: '-0.25rem', color: '#64748b' }}>
+              {en ? 'Audio ducking enabled for background preservation.' : 'ប្រើប្រាស់ Audio Ducking សម្រាប់រក្សាតន្ត្រីផ្ទៃខាងក្រោយ។'}
+            </p>
+          )}
+          {file && file.size > 20e6 && (
+            <p className="notice long-job-warning" style={{ color: '#d97706', fontWeight: 500 }}>
+              {t('long_job_eta')}
+            </p>
+          )}
+          {file && !job && (
+            <button className="primary" onClick={upload} disabled={submitting}>
+              {t('start_dubbing')}
+            </button>
+          )}
+          {pct > 0 && <progress value={pct} max="100" aria-label="Upload progress" />}
+          {err && (
+            <p role="alert" className="error">
+              {err}
+            </p>
+          )}
+        </section>
+        <section className="card">
+          <h2>{t('processing_heading')}</h2>
+          {stages.map((s, i) => (
+            <div key={s} className={'stage ' + (stages.indexOf(job?.stage) >= i ? 'done' : '')}>
+              <i>{i + 1}</i>
+              {['Upload', 'Transcribe', 'Translate', 'Voice', 'Mix', 'Done'][i]}
+            </div>
+          ))}
+          <progress value={job?.progress || pct} max="100" />
+          <p>
+            {job?.status === 'queued' ? (en ? 'Queued (waiting for slot)' : 'កំពុងរង់ចាំក្នុងជួរ · Queued') : (job?.stage || t('stage_waiting'))} · {job?.progress || pct || 0}%
+            {job?.eta_seconds > 0 && (
+              <span className="eta-badge" style={{ marginLeft: '0.75rem', color: '#6366f1', fontWeight: 600 }}>
+                ({en ? 'ETA: ~' : 'នៅសល់ប្រហែល ~'}{Math.ceil(job.eta_seconds / 60)} {en ? 'min' : 'នាទី'})
+              </span>
+            )}
+          </p>
+          {job?.error && (
+            <p role="alert" className="error">
+              [{job.error.code || 'PROCESSING_FAILED'}] {en ? job.error.message_en : job.error.message_km}
+            </p>
+          )}
+          {job && ['queued', 'running'].includes(job.status) && (
+            <button className="secondary" onClick={() => fetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' })}>
+              {t('cancel_btn')}
+            </button>
+          )}
+          {job?.status === 'completed' && (
+            <>
+              <div className="players-compare" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+                <div>
+                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>{en ? 'Original Video' : 'វីដេអូដើម · Original'}</h4>
+                  <video className="preview original-player" aria-label="Original video" controls src={file ? URL.createObjectURL(file) : `${A}/jobs/${job.id}/download/source`} style={{ width: '100%', borderRadius: '0.5rem' }} />
+                </div>
+                <div>
+                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>{en ? 'Dubbed Video (Khmer)' : 'វីដេអូបកប្រែជាភាសាខ្មែរ · Dubbed'}</h4>
+                  <video className="preview dubbed-player" aria-label="Dubbed video" controls src={`${A}/jobs/${job.id}/download/video`} style={{ width: '100%', borderRadius: '0.5rem' }} />
+                </div>
+              </div>
+              <nav style={{ marginTop: '1rem' }}>
+                {['video', 'audio', 'srt', 'vtt'].map((k) => (
+                  <a key={k} href={`${A}/jobs/${job.id}/download/${k}`} download>
+                    Download {k.toUpperCase()}
+                  </a>
+                ))}
+              </nav>
+            </>
+          )}
+        </section>
+      </div>
+      {job?.status === 'awaiting_review' && (
+        <section className="card">
+          <h2>{t('review_heading')}</h2>
+          {rows.map((r, i) => (
+            <label className="review" key={r.id}>
+              {r.start.toFixed(1)}s · {r.source_text}
+              <textarea
+                value={r.text_km}
+                onChange={(e) =>
+                  Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))
+                }
+              />
+            </label>
+          ))}
+          <button className="primary" onClick={save}>
+            {t('save_and_continue')}
+          </button>
+        </section>
+      )}
+      <section className="card">
+        <h2>{t('job_history')}</h2>
+        {jobs.length ? (
+          jobs
+            .slice(0, 8)
+            .map((j) => (
+              <p className="history" key={j.id}>
+                {j.filename || j.id} · {j.status}{' '}
+                {j.status === 'completed' && <a href={`${A}/jobs/${j.id}/download/video`}>MP4</a>}
+              </p>
+            ))
+        ) : (
+          <p>{t('history_empty')}</p>
+        )}
+      </section>
+      <footer>Local processing · Upload content you have permission to use.</footer>
+    </main>
+  );
+}

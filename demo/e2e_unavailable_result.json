@@ -1,0 +1,93 @@
+{
+  "mode": "unavailable",
+  "env": {
+    "DEMO_MODE": "1",
+    "TTS_PROVIDER": "none",
+    "TRANSLATION_PROVIDER": "demo"
+  },
+  "started_utc": "2026-10-16T05:56:56Z",
+  "health": {
+    "status": "ok",
+    "ffmpeg": true,
+    "ffprobe": true,
+    "asr": "faster-whisper (loaded on demand)",
+    "translation": "demo",
+    "tts": "auto: Edge TTS -> Azure Speech (if configured) -> MMS; Edge and MMS live probes PASS 2026-10-16",
+    "workers": 2
+  },
+  "job_id": "e909cde8abac4bcb97ba5bbc218e230e",
+  "timeline": [
+    {
+      "elapsed_s": 0.0,
+      "status": "queued",
+      "stage": "queued",
+      "progress": 0
+    },
+    {
+      "elapsed_s": 1.5,
+      "status": "running",
+      "stage": "transcribe",
+      "progress": 18
+    },
+    {
+      "elapsed_s": 7.5,
+      "status": "failed",
+      "stage": "failed",
+      "progress": 100
+    }
+  ],
+  "job": {
+    "id": "e909cde8abac4bcb97ba5bbc218e230e",
+    "status": "failed",
+    "stage": "failed",
+    "progress": 100,
+    "filename": "sample_input.mp4",
+    "source_path": "C:\\Users\\ASUS ROG G15\\OneDrive\\Desktop\\Soundme\\uploads\\e909cde8abac4bcb97ba5bbc218e230e\\sample_input.mp4",
+    "options": {
+      "source_lang": "en",
+      "voice": "km-KH-SreymomNeural",
+      "keep_background": false,
+      "burn_subtitles": false,
+      "review_before_tts": false
+    },
+    "started_at": 1792130216.8272927,
+    "detected_language": "en",
+    "error": {
+      "code": "TTS_UNAVAILABLE",
+      "message_en": "TTS_UNAVAILABLE: no reachable TTS providers are configured.",
+      "message_km": "មិនអាចបង្កើតសំឡេងខ្មែរបានទេ។ សូមសាកល្បងម្ដងទៀត។"
+    },
+    "segments": [
+      {
+        "id": 1,
+        "start": 0.0,
+        "end": 2.4,
+        "source_text": "Hello, welcome to SoundMe.",
+        "text_km": "សូមពិនិត្យ៖ Hello, welcome to SoundMe.",
+        "speaker": null
+      },
+      {
+        "id": 2,
+        "start": 2.4,
+        "end": 5.6,
+        "source_text": "This is a short English test sentence for dubbing.",
+        "text_km": "សូមពិនិត្យ៖ This is a short English test sentence for dubbing.",
+        "speaker": null
+      }
+    ]
+  },
+  "artifacts": {
+    "sample_input.mp4": 60768,
+    "source.wav": 191226
+  },
+  "downloads": {
+    "video": 404,
+    "audio": 404,
+    "srt": 404,
+    "vtt": 404,
+    "json": 404
+  },
+  "ok": true,
+  "elapsed_s": 7.7,
+  "finished_utc": "2026-10-16T05:57:04Z"
+}

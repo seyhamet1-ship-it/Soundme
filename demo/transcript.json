@@ -1,0 +1,31 @@
+{
+  "detected_language": "en",
+  "language_probability": 1.0,
+  "mode": "real",
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.0,
+      "end": 2.0,
+      "source_text": "Hello, welcome to SoundMe.",
+      "text_km": "អរគុណអ្នក ដែលបានមកលេង SoundMe។",
+      "speaker": null
+    },
+    {
+      "id": 2,
+      "start": 2.0,
+      "end": 6.0,
+      "source_text": "This is a short English test sentence for dubbing.",
+      "text_km": "នេះ ជា សម្តី សាកល្បង ភាសា អង់គ្លេស ខ្លី សម្រាប់ ការ ចម្រៀង។",
+      "speaker": null
+    }
+  ],
+  "translation_providers": [
+    "nllb-local",
+    "nllb-local"
+  ],
+  "tts_providers": [
+    "edge-tts",
+    "edge-tts"
+  ]
+}

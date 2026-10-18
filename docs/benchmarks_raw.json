@@ -1,0 +1,59 @@
+[
+  {
+    "duration_min": 1,
+    "lang": "en",
+    "file_size_mb": 0.4,
+    "stages": {
+      "probe": 0.06,
+      "extract": 0.12,
+      "asr": 16.23,
+      "translate": 56.52,
+      "tts": 25.7,
+      "total": 98.63
+    },
+    "peak_rss_kb": 3565576,
+    "tts_retries": 0,
+    "tts_failures": 0,
+    "total_segments": 12,
+    "disk_use_kb": 4441,
+    "per_hour_min": 98.6
+  },
+  {
+    "duration_min": 5,
+    "lang": "en",
+    "file_size_mb": 2.0,
+    "stages": {
+      "probe": 0.06,
+      "extract": 0.3,
+      "asr": 72.73,
+      "translate": 193.83,
+      "tts": 117.95,
+      "total": 384.87
+    },
+    "peak_rss_kb": 3892384,
+    "tts_retries": 0,
+    "tts_failures": 0,
+    "total_segments": 60,
+    "disk_use_kb": 23178,
+    "per_hour_min": 77.0
+  },
+  {
+    "duration_min": 15,
+    "lang": "en",
+    "file_size_mb": 6.0,
+    "stages": {
+      "probe": 0.95,
+      "extract": 0.62,
+      "asr": 277.61,
+      "translate": 507.11,
+      "tts": 213.44,
+      "total": 999.73
+    },
+    "peak_rss_kb": 3567720,
+    "tts_retries": 0,
+    "tts_failures": 0,
+    "total_segments": 181,
+    "disk_use_kb": 69812,
+    "per_hour_min": 66.6
+  }
+]

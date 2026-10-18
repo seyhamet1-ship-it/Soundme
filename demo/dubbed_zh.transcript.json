@@ -1,0 +1,31 @@
+{
+  "detected_language": "zh",
+  "language_probability": 1.0,
+  "mode": "real",
+  "segments": [
+    {
+      "id": 1,
+      "start": 0.0,
+      "end": 2.56,
+      "source_text": "大家好! 欢迎使用SUMMY!",
+      "text_km": "សូមអញ្ជើញទៅលេងកម្មវិធី SUMMY!",
+      "speaker": null
+    },
+    {
+      "id": 2,
+      "start": 2.82,
+      "end": 6.14,
+      "source_text": "这是一个用于配音测试的中文短视频。",
+      "text_km": "នេះជាវីដេអូខ្លីមួយក្នុងភាសាចិន សម្រាប់ការធ្វើតេស្តសំឡេង។",
+      "speaker": null
+    }
+  ],
+  "translation_providers": [
+    "nllb-local",
+    "nllb-local"
+  ],
+  "tts_providers": [
+    "edge-tts",
+    "edge-tts"
+  ]
+}
