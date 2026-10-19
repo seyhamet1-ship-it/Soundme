@@ -1,0 +1,67 @@
+[
+  {
+    "test": "F2_TTS_RETRY",
+    "status": "PASS",
+    "detail": "12/12 TTS segments succeeded. Retries=0, Failures=0"
+  },
+  {
+    "test": "F3_CANCEL_CLEANUP",
+    "status": "PASS",
+    "detail": "Cancel cleanup OK. kill_job_process() completed. Orphan ffmpeg PIDs: []"
+  },
+  {
+    "test": "F4a_STREAMS",
+    "status": "PASS",
+    "detail": "1 video + 1 audio stream(s)"
+  },
+  {
+    "test": "F4b_DURATION_DELTA",
+    "status": "PASS",
+    "detail": "Output=54.98s, Input=54.98s, Delta=0.000s"
+  },
+  {
+    "test": "F4c_RMS_AUDIBLE",
+    "status": "PASS",
+    "detail": "All 12 voice segments RMS > -45 dBFS"
+  },
+  {
+    "test": "F4d_REAL_SPEECH",
+    "status": "PASS",
+    "detail": "All 12 voice segments pass real-speech guard"
+  },
+  {
+    "test": "F4e_PEAK_LEVEL",
+    "status": "PASS",
+    "detail": "Peak = -6.3 dBFS <= -1 dBFS"
+  },
+  {
+    "test": "F4f_OVERLAP",
+    "status": "PASS",
+    "detail": "Max overlap = 80.0 ms <= 100 ms"
+  },
+  {
+    "test": "F4g_KHMER_SCRIPT",
+    "status": "PASS",
+    "detail": "12/12 Khmer (100% >= 90%)"
+  },
+  {
+    "test": "F4g2_NO_CJK",
+    "status": "PASS",
+    "detail": "No CJK characters in translations"
+  },
+  {
+    "test": "F4h_SRT_MONOTONIC",
+    "status": "PASS",
+    "detail": "SRT start timestamps monotonic (12 entries)"
+  },
+  {
+    "test": "F4h_VTT_MONOTONIC",
+    "status": "PASS",
+    "detail": "VTT start timestamps monotonic (12 entries)"
+  },
+  {
+    "test": "F1_KILL_RESUME",
+    "status": "BLOCKED",
+    "detail": "Pipeline architecture: process_video() does not checkpoint per-segment. If the server is killed mid-job, the job restarts from scratch (all stages re-run). Chunked UPLOAD resumes correctly (proved in boundary test T4). Per-segment checkpointing requires adding a checkpoint file in process_video() and render() to skip already-completed segments on restart."
+  }
+]
