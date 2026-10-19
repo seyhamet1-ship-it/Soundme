@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "file_size_bytes": 508800943,
+  "file_size_mb": 485.23,
+  "source_duration_s": 72.47,
+  "output_duration_s": 72.47,
+  "probe_time_s": 0.145,
+  "mux_time_s": 11.368,
+  "disk_mb": 982.27,
+  "peak_rss_mb": 51.5,
+  "total_segments": 11,
+  "assertions": {
+    "streams": true,
+    "duration_delta": true,
+    "real_speech": true,
+    "peak_level": true,
+    "khmer_script": true,
+    "no_cjk": true,
+    "srt_monotonic": true
+  }
+}
