@@ -72,26 +72,32 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
   "translate_total": 0, "translate_skipped": 0, "translate_computed": 0,
   "tts_total": 0, "tts_skipped": 0, "tts_cached": 0, "tts_computed": 0,
  }
+ stage_times: dict[str, float] = {}
  try:
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
+  t_probe = time.time()
   update_job(job_id,status="running",stage="validate",progress=3); meta=probe(source); video=next(s for s in meta["streams"] if s["codec_type"]=="video")
+  stage_times["probe"] = round(time.time() - t_probe, 3)
   if not any(s["codec_type"]=="audio" for s in meta["streams"]): raise ValueError("This video has no audio track to transcribe.")
   duration=float(meta["format"]["duration"]); wav=root/"source.wav"
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
+  t_extract = time.time()
   update_job(job_id,stage="extract",progress=8)
   if not (wav.exists() and wav.stat().st_size > 1000):
    run([FFMPEG,"-y","-i",str(source),"-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le",str(wav)], job_id=job_id)
   else:
    counters["extract_skipped"] = True
    log.info("Job %s: Audio extraction checkpoint hit; skipped extract", job_id)
+  stage_times["extract"] = round(time.time() - t_extract, 3)
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
   update_job(job_id,stage="transcribe",progress=18)
+  t_asr = time.time()
   asr_ckpt = root / "asr_checkpoint.json"
   if asr_ckpt.exists():
    try:
@@ -119,11 +125,13 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
     "probability": transcript.language_probability,
     "segments": [{"start": float(s.start), "end": float(s.end), "text": str(s.text).strip()} for s in transcript.segments]
    }, ensure_ascii=False, indent=2), encoding="utf-8")
+  stage_times["asr"] = round(time.time() - t_asr, 3)
   segments=[Segment(i+1,float(s.start),float(s.end),str(s.text).strip()) for i,s in enumerate(transcript.segments) if str(s.text).strip()]
   if not segments: raise ValueError("No speech was detected. Try a video with audible speech.")
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
+  t_translate = time.time()
   update_job(job_id,detected_language=transcript.language,stage="translate",progress=38)
   trans_ckpt = root / "translation_checkpoint.json"
   saved_trans = {}
@@ -156,13 +164,14 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
   else:
    counters["translate_computed"] = 0
    log.info("Job %s: Translation checkpoint hit; skipped %d segments", job_id, len(segments))
+  stage_times["translate"] = round(time.time() - t_translate, 3)
   if opts.get("review_before_tts"):
    update_job(job_id,status="awaiting_review",stage="review",progress=50,segments=[s.__dict__ for s in segments],providers=providers); return
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
   from app.render import render
-  render(job_id,source,root,segments,duration,opts,transcript,providers,video,started,counters=counters)
+  render(job_id,source,root,segments,duration,opts,transcript,providers,video,started,counters=counters,stage_times=stage_times)
  except Exception as exc:
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)

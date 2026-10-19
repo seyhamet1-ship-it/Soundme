@@ -222,9 +222,9 @@ def behavioral_checks() -> list[dict]:
         "evidence": "sanitize_text_for_tts present in providers.py",
     })
     checks.append({
-        "name": "providers-has-edge-lock",
-        "ok": "_lock = asyncio.Lock()" in providers_src,
-        "evidence": "asyncio.Lock present on EdgeTTSProvider",
+        "name": "providers-has-edge-concurrency",
+        "ok": "_sem = " in providers_src and "Semaphore" in providers_src,
+        "evidence": "threading.Semaphore present on EdgeTTSProvider",
     })
     checks.append({
         "name": "providers-has-mms-token-guard",

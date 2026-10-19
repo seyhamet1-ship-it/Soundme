@@ -10,17 +10,19 @@ from app.storage import get_job, update_job
 from app.pipeline import run
 import shutil
 FFMPEG=os.getenv("FFMPEG","ffmpeg"); FFPROBE=os.getenv("FFPROBE","ffprobe")
-def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:float,opts:dict[str,Any],transcript:Any,providers:list[str],video_stream:dict[str,Any],started:float,counters:dict[str,Any]|None=None)->None:
+def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:float,opts:dict[str,Any],transcript:Any,providers:list[str],video_stream:dict[str,Any],started:float,counters:dict[str,Any]|None=None,stage_times:dict[str,float]|None=None)->None:
  if (get_job(job_id) or {}).get("status") == "canceled":
   if root.exists(): shutil.rmtree(root, ignore_errors=True)
   return
  ctr = counters if counters is not None else {}
+ stg = stage_times if stage_times is not None else {}
  ctr.setdefault("tts_total", len(segments))
  ctr.setdefault("tts_skipped", 0)
  ctr.setdefault("tts_cached", 0)
  ctr.setdefault("tts_computed", 0)
  from app.long_video import compute_content_hash, get_cached_segment_audio, store_cached_segment_audio
 
+ t_tts = time.time()
  dub=np.zeros(int(duration*48000),dtype=np.float32); speech=[]; tts=[]; fit_stats=[]; prev_end=0.0; demo_audio=False; update_job(job_id,stage="voice",progress=54)
 
  from concurrent.futures import ThreadPoolExecutor
@@ -78,6 +80,8 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
     tts_providers[i] = prov
     ctr["tts_computed"] += 1
 
+ stg["tts"] = round(time.time() - t_tts, 3)
+ t_fitmix = time.time()
  for idx,s in enumerate(segments):
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
@@ -103,12 +107,16 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
  if peak: dub*=min(.89,.89/peak)
  audio=root/"dub.wav"
  with wave.open(str(audio),"wb") as f: f.setnchannels(1);f.setsampwidth(2);f.setframerate(48000);f.writeframes((np.clip(dub,-.89,.89)*32767).astype("<i2").tobytes())
- (root/"transcript.json").write_text(json.dumps({"detected_language":transcript.language,"language_probability":transcript.language_probability,"mode":"demo-plumbing" if demo_audio else "real","segments":[s.__dict__ for s in segments],"translation_providers":providers,"tts_providers":tts,"fit_stats":fit_stats,"counters":ctr},ensure_ascii=False,indent=2),encoding="utf-8")
+ stg["fitmix"] = round(time.time() - t_fitmix, 3)
+ (root/"transcript.json").write_text(json.dumps({"detected_language":transcript.language,"language_probability":transcript.language_probability,"mode":"demo-plumbing" if demo_audio else "real","segments":[s.__dict__ for s in segments],"translation_providers":providers,"tts_providers":tts,"fit_stats":fit_stats,"counters":ctr,"stage_times":stg},ensure_ascii=False,indent=2),encoding="utf-8")
  (root/"subtitles.srt").write_text(write_srt(segments),encoding="utf-8"); (root/"subtitles.vtt").write_text(write_vtt(segments),encoding="utf-8")
+ t_mux = time.time()
  update_job(job_id,stage="mix",progress=82); video=root/"dubbed.mp4"; args=[FFMPEG,"-y","-i",str(source),"-i",str(audio),"-map","0:v:0","-map","1:a:0"]
  if opts.get("keep_background"):
   args=[FFMPEG,"-y","-i",str(source),"-i",str(audio),"-filter_complex","[0:a:0]volume=0.12[bg];[bg][1:a:0]amix=inputs=2:duration=longest:normalize=0[mix]","-map","0:v:0","-map","[mix]"]
  args += ["-c:v","copy" if video_stream.get("codec_name") in {"h264","av1"} and not opts.get("burn_subtitles") else "libx264","-preset","veryfast","-c:a","aac","-b:a","192k","-t",str(duration),"-movflags","+faststart"]
  if opts.get("burn_subtitles"):
   path=str(root/"subtitles.srt").replace("\\","/").replace(":","\\:").replace("'","\\'"); args += ["-vf",f"subtitles='{path}':force_style='FontName=Khmer OS,FontSize=24,Outline=2,Shadow=1,MarginV=30'"]
- run(args+[str(video)]); update_job(job_id,status="completed",stage="done",progress=100,outputs={"video":video.name,"audio":audio.name,"srt":"subtitles.srt","vtt":"subtitles.vtt","json":"transcript.json"},detected_language=transcript.language,providers={"translation":sorted(set(providers)),"tts":sorted(set(tts))},segments=[s.__dict__ for s in segments],timings={"segment_durations":speech,"processing_seconds":round(time.time()-started,2),"fit_stats":fit_stats,"counters":ctr})
+ run(args+[str(video)])
+ stg["mux"] = round(time.time() - t_mux, 3)
+ update_job(job_id,status="completed",stage="done",progress=100,outputs={"video":video.name,"audio":audio.name,"srt":"subtitles.srt","vtt":"subtitles.vtt","json":"transcript.json"},detected_language=transcript.language,providers={"translation":sorted(set(providers)),"tts":sorted(set(tts))},segments=[s.__dict__ for s in segments],timings={"segment_durations":speech,"processing_seconds":round(time.time()-started,2),"fit_stats":fit_stats,"counters":ctr,"stage_times":stg})

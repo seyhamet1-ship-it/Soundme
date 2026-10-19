@@ -76,7 +76,7 @@ class WhisperASR:
                         self._batched_pipe = BatchedInferencePipeline(model=self.model)
                 batch_size = int(os.getenv("ASR_BATCH_SIZE", "8"))
                 segments, info = self._batched_pipe.transcribe(
-                    audio_input, batch_size=batch_size, language=language, word_timestamps=True
+                    audio_input, batch_size=batch_size, language=language, word_timestamps=True, beam_size=beam_size
                 )
                 sentence_segs = []
                 for s in segments:

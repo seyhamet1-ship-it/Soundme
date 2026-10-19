@@ -2,17 +2,17 @@
   {
     "test": "INTERRUPT_TRIGGER",
     "status": "PASS",
-    "detail": "Worker terminated at ~50% with 22 voice segments"
+    "detail": "Worker terminated at ~50% with 38 voice segments"
   },
   {
     "test": "CHECKPOINTS_PERSISTED",
     "status": "PASS",
-    "detail": "All intermediate checkpoints and 22 voice segments persisted on disk"
+    "detail": "All intermediate checkpoints and 38 voice segments persisted on disk"
   },
   {
     "test": "JOB_COMPLETION",
     "status": "PASS",
-    "detail": "Job completed cleanly after resumption in 16.74s"
+    "detail": "Job completed cleanly after resumption in 16.23s"
   },
   {
     "test": "ASR_NOT_RECOMPUTED",
@@ -27,7 +27,7 @@
   {
     "test": "TTS_NOT_RECOMPUTED",
     "status": "PASS",
-    "detail": "Finished TTS segments preserved: skipped=22, cached=38, computed=0"
+    "detail": "Finished TTS segments preserved: skipped=38, cached=22, computed=0"
   },
   {
     "test": "OUTPUT_STREAMS",
@@ -42,7 +42,7 @@
   {
     "test": "OUTPUT_PEAK_LEVEL",
     "status": "PASS",
-    "detail": "Peak = -6.2 dBFS <= -1 dBFS"
+    "detail": "Peak = -6.4 dBFS <= -1 dBFS"
   },
   {
     "test": "OUTPUT_KHMER_SCRIPT",

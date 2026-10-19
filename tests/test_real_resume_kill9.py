@@ -25,6 +25,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 FFMPEG = os.getenv("FFMPEG", "ffmpeg")
 FFPROBE = os.getenv("FFPROBE", "ffprobe")
@@ -253,7 +257,12 @@ def main():
     dead_jid = uuid.uuid4().hex
     set_job(dead_jid, {"id": dead_jid, "status": "running", "source_path": "nonexistent_file.mp4"})
     recover_jobs()
-    dead_job = get_job(dead_jid) or {}
+    dead_job = {}
+    for _ in range(15):
+        dead_job = get_job(dead_jid) or {}
+        if dead_job.get("status") is not None:
+            break
+        time.sleep(0.2)
     if dead_job.get("status") == "failed" and dead_job.get("error", {}).get("code") == "SERVER_RESTARTED":
         report("DEAD_PROCESS_CLEANUP", "PASS", f"Dead running job marked 'failed' with SERVER_RESTARTED code and bilingual message: {dead_job.get('error')}")
     else:
