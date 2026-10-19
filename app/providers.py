@@ -236,19 +236,22 @@ def sanitize_text_for_tts(text: str) -> str:
 
 
 class EdgeTTSProvider:
-    _lock = asyncio.Lock()
+    _sem = __import__("threading").Semaphore(int(os.getenv("EDGE_TTS_CONCURRENCY", "2")))
 
     async def synthesize(self, text: str, voice: str, destination: Path, rate: str = "+0%") -> None:
         import edge_tts
         import subprocess
         import tempfile
+        import random
+        import time
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(suffix=".mp3", dir=destination.parent, delete=False) as temp:
             mp3_path = Path(temp.name)
         try:
-            max_retries = 2
-            async with self._lock:
+            max_retries = int(os.getenv("EDGE_TTS_MAX_RETRIES", "3"))
+            with EdgeTTSProvider._sem:
+                time.sleep(random.uniform(0.05, 0.15))
                 for attempt in range(max_retries + 1):
                     try:
                         await edge_tts.Communicate(text, voice=voice, rate=rate).save(str(mp3_path))
@@ -257,7 +260,7 @@ class EdgeTTSProvider:
                         raise RuntimeError("Edge TTS produced empty output file.")
                     except Exception as exc:
                         if attempt < max_retries:
-                            await asyncio.sleep(1.0 * (attempt + 1))
+                            await asyncio.sleep(0.3 * (attempt + 1) + random.uniform(0.05, 0.15))
                             continue
                         raise
             subprocess.run(

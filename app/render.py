@@ -22,37 +22,69 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
  from app.long_video import compute_content_hash, get_cached_segment_audio, store_cached_segment_audio
 
  dub=np.zeros(int(duration*48000),dtype=np.float32); speech=[]; tts=[]; fit_stats=[]; prev_end=0.0; demo_audio=False; update_job(job_id,stage="voice",progress=54)
- for idx,s in enumerate(segments):
+
+ from concurrent.futures import ThreadPoolExecutor
+
+ voice = opts.get("voice", "km-KH-SreymomNeural")
+ tts_providers: dict[int, str] = {}
+ to_compute: list[tuple[int, Segment, Path, float, str, str]] = []
+
+ for idx, s in enumerate(segments):
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
   if not s.text_km.strip(): raise ValueError("Khmer translation is empty.")
   if providers[idx].startswith("nllb") and not is_khmer_text(s.text_km): raise ValueError("Translation provider returned non-Khmer text.")
-  slot=max(.2,s.end-s.start); out=root/f"voice-{idx:04}.wav"
-  voice=opts.get("voice","km-KH-SreymomNeural")
-  content_h=compute_content_hash(s.text_km, voice, slot)
-  cached_disk=get_cached_segment_audio(content_h)
+  slot = max(.2, s.end - s.start)
+  out = root / f"voice-{idx:04}.wav"
+  content_h = compute_content_hash(s.text_km, voice, slot)
+  cached_disk = get_cached_segment_audio(content_h)
 
   if out.exists() and out.stat().st_size > 1000:
-   tts_provider = "checkpoint"
+   tts_providers[idx] = "checkpoint"
    ctr["tts_skipped"] += 1
   elif cached_disk is not None and cached_disk.stat().st_size > 1000:
    shutil.copyfile(cached_disk, out)
-   tts_provider = "content-cache"
+   tts_providers[idx] = "content-cache"
    ctr["tts_cached"] += 1
   else:
-   est_dur=len(s.text_km.strip())/12.0
-   rate_pct=min(30,max(0,int(round((est_dur/slot-1.0)*100)))) if est_dur>slot else 0
-   tts_rate=f"+{rate_pct}%"
-   tts_provider=synthesize_khmer(s.text_km,voice,out,slot,idx+1,rate=tts_rate)
-   demo_audio=tts_provider.startswith("demo")
-   if demo_audio:
-    if tts_provider!="demo-tone-not-speech" or os.getenv("DEMO_MODE","").strip().lower() not in {"1","true","yes"}: raise ValueError(f"Non-speech/demo TTS provider cannot complete a dubbing job: {tts_provider}")
-   elif tts_provider not in {"edge-tts","azure-speech"} and not tts_provider.startswith("mms-"): raise ValueError(f"Unrecognized TTS provider cannot complete a dubbing job: {tts_provider}")
-   else: require_real_speech(out)
-   try: store_cached_segment_audio(content_h, out)
+   est_dur = len(s.text_km.strip()) / 12.0
+   rate_pct = min(30, max(0, int(round((est_dur / slot - 1.0) * 100)))) if est_dur > slot else 0
+   to_compute.append((idx, s, out, slot, f"+{rate_pct}%", content_h))
+
+ if to_compute:
+  def _synth_worker(item: tuple[int, Segment, Path, float, str, str]) -> tuple[int, str]:
+   i, seg, out_p, sl, r_rate, c_hash = item
+   if (get_job(job_id) or {}).get("status") == "canceled":
+    return i, "canceled"
+   p_used = synthesize_khmer(seg.text_km, voice, out_p, sl, i + 1, rate=r_rate)
+   if p_used.startswith("demo"):
+    if p_used != "demo-tone-not-speech" or os.getenv("DEMO_MODE", "").strip().lower() not in {"1", "true", "yes"}:
+     raise ValueError(f"Non-speech/demo TTS provider cannot complete a dubbing job: {p_used}")
+   elif p_used not in {"edge-tts", "azure-speech"} and not p_used.startswith("mms-"):
+    raise ValueError(f"Unrecognized TTS provider cannot complete a dubbing job: {p_used}")
+   else:
+    require_real_speech(out_p)
+   try: store_cached_segment_audio(c_hash, out_p)
    except Exception: pass
-   ctr["tts_computed"] += 1
+   return i, p_used
+
+  concurrency = int(os.getenv("TTS_CONCURRENCY", "2"))
+  with ThreadPoolExecutor(max_workers=concurrency) as pool:
+   for i, prov in pool.map(_synth_worker, to_compute):
+    if prov == "canceled":
+     if root.exists(): shutil.rmtree(root, ignore_errors=True)
+     return
+    tts_providers[i] = prov
+    ctr["tts_computed"] += 1
+
+ for idx,s in enumerate(segments):
+  if (get_job(job_id) or {}).get("status") == "canceled":
+   if root.exists(): shutil.rmtree(root, ignore_errors=True)
+   return
+  slot=max(.2,s.end-s.start); out=root/f"voice-{idx:04}.wav"
+  tts_provider = tts_providers.get(idx, "unknown")
+  if tts_provider.startswith("demo"): demo_audio = True
   tts.append(tts_provider)
   with wave.open(str(out),"rb") as f: rate=f.getframerate(); data=np.frombuffer(f.readframes(f.getnframes()),dtype="<i2").astype(np.float32)/32768
   raw_dur=len(data)/rate
