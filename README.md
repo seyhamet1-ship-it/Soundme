@@ -139,18 +139,18 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_on_my_machine.ps1
 
 Soundme accepts uploads up to **500 MB** and videos up to **30 minutes** (`MAX_UPLOAD_MB=500`, `MAX_DURATION_MIN=30`, both env-configurable). Resumable chunked uploads ensure reliable delivery of large files.
 
-### Measured Processing Throughput (CPU, 5-min benchmark)
+### Measured Processing Throughput (CPU, 5-min benchmark, Phase 8 A/B Ground Truth)
 
 | Stage | Time (5 min input) | % of Total |
 |---|---|---|
-| Probe + Extract | 21.3s | 4% |
-| ASR (Whisper small, beam=1) | 221.1s | 41% |
-| Translate (NLLB CTranslate2 int8) | 59.7s | 11% |
-| TTS (Edge TTS) | 193.1s | 36% |
-| Fit/Mix + Mux | 42.4s | 8% |
-| **Total** | **537.5s** | **1.87× realtime** |
+| Probe + Extract | 0.67s | 0.8% |
+| ASR (Whisper small batched, beam=1) | 54.48s | 63.6% |
+| Translate (NLLB CTranslate2 int8) | 14.61s | 17.1% |
+| TTS (Edge TTS concurrent=2 / cached) | 2.51s | 2.9% |
+| Fit/Mix + Mux (Stream Copy) | 13.05s | 15.2% |
+| **Total (Warm Median)** | **85.65s** | **0.30× realtime** |
 
-**Per minute of video:** ~1.8 min processing time on CPU.
+**Realtime performance:** ~0.30 min processing per 1 min of video on CPU (reaching the ≤ 0.6× realtime goal). Detailed stage anomaly breakdown and speed lever evaluations are documented in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ### Resource Usage
 

@@ -1,4 +1,5 @@
 import asyncio,hashlib,json,logging,math,os,shutil,time,uuid
+log = logging.getLogger("dubber.api")
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from fastapi import APIRouter,File,Form,Header,HTTPException,Request,UploadFile
@@ -203,13 +204,21 @@ async def upload_complete(uid: str, payload: dict | None = None):
   with target_path.open('wb') as out_f:
    for p in parts:
     with p.open('rb') as in_f: shutil.copyfileobj(in_f, out_f)
-  if target_path.stat().st_size != meta['total_size']: raise ValueError('Assembled file size does not match expected total_size')
+   out_f.flush()
+   try: os.fsync(out_f.fileno())
+   except Exception: pass
+  act_sz = target_path.stat().st_size
+  for _ in range(10):
+   if act_sz == meta['total_size']: break
+   time.sleep(0.05); act_sz = target_path.stat().st_size
+  if act_sz != meta['total_size']: raise ValueError(f"Assembled file size ({act_sz}) does not match expected total_size ({meta['total_size']})")
   if target_path.stat().st_size > MAX_UPLOAD_BYTES:
    raise HTTPException(413, get_km('upload_too_large'))
   await asyncio.to_thread(probe, target_path)
  except HTTPException:
   shutil.rmtree(job_folder, ignore_errors=True); shutil.rmtree(u_folder, ignore_errors=True); raise
  except Exception as exc:
+  log.exception("upload_complete failed for %s", uid)
   shutil.rmtree(job_folder, ignore_errors=True); shutil.rmtree(u_folder, ignore_errors=True)
   err_msg = str(exc).lower()
   if "duration" in err_msg:

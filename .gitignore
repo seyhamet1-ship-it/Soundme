@@ -21,4 +21,5 @@ tests/benchmark/
 tests/media/
 tests/fault_work_1min/
 tools/models/
+tests/scratch/
 *.log

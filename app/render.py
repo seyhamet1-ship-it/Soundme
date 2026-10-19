@@ -106,7 +106,7 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
  peak=float(np.max(np.abs(dub))) if len(dub) else 0
  if peak: dub*=min(.89,.89/peak)
  audio=root/"dub.wav"
- with wave.open(str(audio),"wb") as f: f.setnchannels(1);f.setsampwidth(2);f.setframerate(48000);f.writeframes((np.clip(dub,-.89,.89)*32767).astype("<i2").tobytes())
+ with wave.open(str(audio),"wb") as wf: wf.setnchannels(1);wf.setsampwidth(2);wf.setframerate(48000);wf.writeframes((np.clip(dub,-.89,.89)*32767).astype("<i2").tobytes())
  stg["fitmix"] = round(time.time() - t_fitmix, 3)
  (root/"transcript.json").write_text(json.dumps({"detected_language":transcript.language,"language_probability":transcript.language_probability,"mode":"demo-plumbing" if demo_audio else "real","segments":[s.__dict__ for s in segments],"translation_providers":providers,"tts_providers":tts,"fit_stats":fit_stats,"counters":ctr,"stage_times":stg},ensure_ascii=False,indent=2),encoding="utf-8")
  (root/"subtitles.srt").write_text(write_srt(segments),encoding="utf-8"); (root/"subtitles.vtt").write_text(write_vtt(segments),encoding="utf-8")

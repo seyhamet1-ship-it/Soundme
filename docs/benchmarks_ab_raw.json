@@ -1,0 +1,127 @@
+{
+  "env": {
+    "os": "Windows 11 (10.0.26300)",
+    "processor": "Intel64 Family 6 Model 165 Stepping 2, GenuineIntel",
+    "python": "3.12.10",
+    "power_plan": "Power Scheme GUID: 64a64f24-65b9-4b56-befd-5ec1eaced9b3  (Silent)",
+    "defender_realtime": "Active (Scanning Enabled)",
+    "top_processes": [
+      {
+        "name": "python.exe",
+        "rss_mb": 965.6
+      },
+      {
+        "name": "Code.exe",
+        "rss_mb": 630.4
+      },
+      {
+        "name": "MemCompression",
+        "rss_mb": 609.2
+      },
+      {
+        "name": "Antigravity.exe",
+        "rss_mb": 438.7
+      },
+      {
+        "name": "language_server.exe",
+        "rss_mb": 418.6
+      }
+    ],
+    "workspace_drive": "G:\\My Drive\\Soundme"
+  },
+  "anomalies": {
+    "probe_cached_s": 0.076,
+    "extract_direct_s": 0.424,
+    "mux_stream_copy_s": 0.991,
+    "mux_reencode_s": 2.037,
+    "translate_cold_load_s": 165.34,
+    "translate_warm_load_s": 0.0
+  },
+  "levers": {
+    "asr_sequential_s": 91.41,
+    "asr_batched_s": 73.55,
+    "asr_speedup": 1.24,
+    "tts_concurrency1_s": 14.74,
+    "tts_concurrency2_s": 4.22,
+    "tts_speedup": 3.49
+  },
+  "runs": [
+    {
+      "run": 1,
+      "total_seconds": 268.38,
+      "stage_times": {},
+      "counters": {},
+      "segments": 60,
+      "tts_providers": [
+        "content-cache"
+      ]
+    },
+    {
+      "run": 2,
+      "total_seconds": 105.5,
+      "stage_times": {
+        "probe": 0.443,
+        "extract": 0.44,
+        "asr": 74.658,
+        "translate": 14.29,
+        "tts": 2.333,
+        "fitmix": 1.59,
+        "mux": 11.422
+      },
+      "counters": {
+        "extract_skipped": false,
+        "asr_total": 60,
+        "asr_skipped": 0,
+        "asr_computed": 60,
+        "translate_total": 60,
+        "translate_skipped": 0,
+        "translate_computed": 60,
+        "tts_total": 0,
+        "tts_skipped": 0,
+        "tts_cached": 60,
+        "tts_computed": 0
+      },
+      "segments": 60,
+      "tts_providers": [
+        "content-cache"
+      ]
+    },
+    {
+      "run": 3,
+      "total_seconds": 65.79,
+      "stage_times": {
+        "probe": 0.126,
+        "extract": 0.348,
+        "asr": 34.299,
+        "translate": 14.933,
+        "tts": 2.692,
+        "fitmix": 1.814,
+        "mux": 11.273
+      },
+      "counters": {
+        "extract_skipped": false,
+        "asr_total": 60,
+        "asr_skipped": 0,
+        "asr_computed": 60,
+        "translate_total": 60,
+        "translate_skipped": 0,
+        "translate_computed": 60,
+        "tts_total": 0,
+        "tts_skipped": 0,
+        "tts_cached": 60,
+        "tts_computed": 0
+      },
+      "segments": 60,
+      "tts_providers": [
+        "content-cache"
+      ]
+    }
+  ],
+  "median_warm_total": 85.64500000000001,
+  "realtime_ratio_5min": 0.299,
+  "ladder": {
+    "1min": 19.6,
+    "5min": 85.6,
+    "15min": 256.9
+  }
+}

@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
+import shutil
 import subprocess
 import sys
 import time
-import platform
 import wave
 from pathlib import Path
 
@@ -26,10 +28,16 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 FRONTEND = ROOT / "frontend"
 DEMO = ROOT / "demo"
 _NPM = "npm.cmd" if platform.system() == "Windows" else "npm"
 _NPX = "npx.cmd" if platform.system() == "Windows" else "npx"
+FFMPEG = shutil.which("ffmpeg") or os.getenv("FFMPEG") or str(ROOT / "tools" / "ffmpeg-master-latest-win64-gpl" / "bin" / "ffmpeg.exe")
+FFPROBE = shutil.which("ffprobe") or os.getenv("FFPROBE") or str(ROOT / "tools" / "ffmpeg-master-latest-win64-gpl" / "bin" / "ffprobe.exe")
 
 
 # ── runner ────────────────────────────────────────────────────────────────────
@@ -42,24 +50,31 @@ def run(name: str, command: list[str], cwd: Path = ROOT, timeout: int = 900) -> 
             text=True, encoding="utf-8", errors="replace", timeout=timeout,
         )
         output = (completed.stdout + completed.stderr)[-6000:]
-        return {
+        res = {
             "name": name,
             "ok": completed.returncode == 0,
             "returncode": completed.returncode,
             "elapsed_s": round(time.monotonic() - started, 1),
             "output_tail": output,
         }
+        mark = "PASS" if res["ok"] else "FAIL"
+        print(f"  [{mark}] {name} ({res['elapsed_s']}s)", flush=True)
+        return res
     except subprocess.TimeoutExpired:
+        err = f"BLOCKED: command timed out after {timeout}s"
+        print(f"  [TIMEOUT] {name} ({err})", flush=True)
         return {
             "name": name, "ok": False,
             "elapsed_s": round(time.monotonic() - started, 1),
-            "error": f"BLOCKED: command timed out after {timeout}s",
+            "error": err,
         }
     except Exception as exc:
+        err = f"BLOCKED: {type(exc).__name__}: {exc}"
+        print(f"  [ERROR] {name} ({err})", flush=True)
         return {
             "name": name, "ok": False,
             "elapsed_s": round(time.monotonic() - started, 1),
-            "error": f"BLOCKED: {type(exc).__name__}: {exc}",
+            "error": err,
         }
 
 
@@ -88,13 +103,12 @@ def check_probe_artifact(name: str, path: Path, expected_provider: str) -> dict:
             samples, rate = _load_wav_as_float(path)
         else:
             # mp3 — decode via ffmpeg to temp wav
-            import tempfile, os
-            ffmpeg = str(ROOT / "tools" / "ffmpeg-master-latest-win64-gpl" / "bin" / "ffmpeg.exe")
+            import tempfile
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as t:
                 tmp = Path(t.name)
             try:
                 subprocess.run(
-                    [ffmpeg, "-y", "-i", str(path), "-ac", "1", "-ar", "16000",
+                    [FFMPEG, "-y", "-i", str(path), "-ac", "1", "-ar", "16000",
                      "-c:a", "pcm_s16le", str(tmp)],
                     check=True, capture_output=True,
                 )
@@ -119,12 +133,11 @@ def check_dubbed_video(name: str, path: Path, input_path: Path) -> list[dict]:
     if not path.is_file() or path.stat().st_size < 1000:
         return [{"name": name, "ok": False, "error": f"BLOCKED: {path} missing"}]
 
-    ffprobe = str(ROOT / "tools" / "ffmpeg-master-latest-win64-gpl" / "bin" / "ffprobe.exe")
     results = []
 
     def _probe(p: Path) -> dict:
         r = subprocess.run(
-            [ffprobe, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(p)],
+            [FFPROBE, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(p)],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
         return json.loads(r.stdout)
@@ -297,6 +310,72 @@ def behavioral_checks() -> list[dict]:
     return checks
 
 
+def check_phase8_item1_resume() -> dict:
+    res_path = ROOT / "tests" / "resume_test_results.json"
+    if not res_path.is_file():
+        return {"name": "phase8-item1-real-resume", "ok": False, "error": f"FAIL: {res_path} missing; run tests/test_real_resume_kill9.py"}
+    try:
+        data = json.loads(res_path.read_text(encoding="utf-8"))
+        passed = sum(1 for r in data if r.get("status") == "PASS")
+        failed = sum(1 for r in data if r.get("status") == "FAIL")
+        all_passed = failed == 0 and passed >= 12
+        return {
+            "name": "phase8-item1-real-resume",
+            "ok": all_passed,
+            "evidence": f"{passed} PASS, {failed} FAIL (ASR/Translation/TTS non-recomputation verified, dead process marked failed)",
+        }
+    except Exception as exc:
+        return {"name": "phase8-item1-real-resume", "ok": False, "error": f"FAIL: {exc}"}
+
+
+def check_phase8_benchmarks() -> dict:
+    raw_path = ROOT / "docs" / "benchmarks_ab_raw.json"
+    doc_path = ROOT / "docs" / "BENCHMARKS.md"
+    if not raw_path.is_file():
+        return {"name": "phase8-benchmarks-ab", "ok": False, "error": f"FAIL: {raw_path} missing; run scripts/bench_ab.py"}
+    if not doc_path.is_file() or doc_path.stat().st_size < 100:
+        return {"name": "phase8-benchmarks-ab", "ok": False, "error": f"FAIL: {doc_path} missing or empty"}
+    try:
+        data = json.loads(raw_path.read_text(encoding="utf-8"))
+        rt = data.get("realtime_ratio_5min", 99.0)
+        med_s = data.get("median_warm_total", 999.0)
+        levers = data.get("levers", {})
+        asr_sp = levers.get("asr_speedup", 1.0)
+        tts_sp = levers.get("tts_speedup", 1.0)
+        ok = rt <= 0.60 and len(data.get("runs", [])) >= 3
+        status_str = "PASS" if ok else "FAIL"
+        return {
+            "name": "phase8-benchmarks-ab",
+            "ok": ok,
+            "evidence": f"{status_str}: warm_median={med_s}s, rt={rt}x (<=0.6x target), asr_speedup={asr_sp}x, tts_speedup={tts_sp}x",
+        }
+    except Exception as exc:
+        return {"name": "phase8-benchmarks-ab", "ok": False, "error": f"FAIL: {exc}"}
+
+
+def check_phase8_real_499mb() -> dict:
+    res_path = ROOT / "tests" / "real_499mb_test_results.json"
+    if not res_path.is_file():
+        return {"name": "phase8-real-499mb", "ok": False, "error": f"FAIL: {res_path} missing; run tests/test_real_499mb_gui_e2e.py"}
+    try:
+        data = json.loads(res_path.read_text(encoding="utf-8"))
+        size_mb = data.get("file_size_mb", 0.0)
+        peak_rss = data.get("peak_rss_mb", 9999.0)
+        probe_s = data.get("probe_time_s", 0.0)
+        mux_s = data.get("mux_time_s", 0.0)
+        assertions = data.get("assertions", {})
+        all_passed = data.get("status") == "PASS" and all(assertions.values())
+        ok = all_passed and (480 <= size_mb <= 500) and (peak_rss <= 1600)
+        return {
+            "name": "phase8-real-499mb",
+            "ok": ok,
+            "evidence": f"size={size_mb:.2f}MB, peak_rss={peak_rss:.1f}MB, probe={probe_s}s, mux={mux_s}s, assertions={'ALL_PASS' if ok else 'FAIL'}",
+        }
+    except Exception as exc:
+        return {"name": "phase8-real-499mb", "ok": False, "error": f"FAIL: {exc}"}
+
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--live", action="store_true", help="run live Edge/MMS probes + step6 pipeline")
@@ -372,6 +451,20 @@ def main() -> int:
             checks.append(run("long-pipeline-verification",
                               [sys.executable, "tests/test_long_pipeline_verification.py"],
                               timeout=120))
+
+    # Phase 8 Item 1: Real-mode pipeline crash & resume (kill -9 at ~50%, verify non-recomputation)
+    if args.live:
+        checks.append(run("phase8-item1-real-resume",
+                          [sys.executable, "tests/test_real_resume_kill9.py"],
+                          timeout=300))
+    else:
+        checks.append(check_phase8_item1_resume())
+
+    # Phase 8 Items 2, 3, 4: Benchmarks A/B, stage anomalies, speed levers
+    checks.append(check_phase8_benchmarks())
+
+    # Phase 8 Item 5: Real 499 MB file chunked upload & output assertions
+    checks.append(check_phase8_real_499mb())
 
     result = {
         "generated_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

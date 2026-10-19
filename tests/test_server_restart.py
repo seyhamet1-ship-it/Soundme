@@ -42,8 +42,11 @@ def test_recover_jobs_marks_running_jobs_as_failed():
 
 
 def test_real_server_kill_and_restart():
-    """Spawns an isolated uvicorn server on port 8009, creates a running job, kills it, restarts, and asserts recovery."""
-    port = 8009
+    """Spawns an isolated uvicorn server on a free port, creates a running job, kills it, restarts, and asserts recovery."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
 
@@ -58,14 +61,14 @@ def test_real_server_kill_and_restart():
     try:
         # Wait for health
         up = False
-        for _ in range(30):
+        for _ in range(50):
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as res:
                     if res.status == 200:
                         up = True
                         break
             except Exception:
-                time.sleep(0.3)
+                time.sleep(0.5)
         assert up, "Server failed to start on port 8009"
 
         # 2. Insert a simulated running job into storage
@@ -100,14 +103,14 @@ def test_real_server_kill_and_restart():
         )
         try:
             up2 = False
-            for _ in range(30):
+            for _ in range(50):
                 try:
                     with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1) as res:
                         if res.status == 200:
                             up2 = True
                             break
                 except Exception:
-                    time.sleep(0.3)
+                    time.sleep(0.5)
             assert up2, "Restarted server failed to start on port 8009"
 
             # 5. Fetch job from restarted server

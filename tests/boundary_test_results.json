@@ -12,7 +12,7 @@
   {
     "test": "T2_NO_ORPHAN_CHUNKS",
     "status": "PASS",
-    "detail": "No chunk directory created for rejected 501 MB upload. Existing chunk dirs: 4"
+    "detail": "No chunk directory created for rejected 501 MB upload. Existing chunk dirs: 5"
   },
   {
     "test": "T3_31MIN_REJECTED",
@@ -27,11 +27,11 @@
   {
     "test": "T4_CANCEL_CLEANUP",
     "status": "PASS",
-    "detail": "Cancel cleanup removed da54a3b77ff14687be2c374da0fea5ad chunk directory completely."
+    "detail": "Cancel cleanup removed e964742106f24d9ea666a3b3dc66b7e8 chunk directory completely."
   },
   {
     "test": "T5_RSS_FLAT",
     "status": "PASS",
-    "detail": "RSS delta 5.0 MB during 499 MB stream. Before=39 MB, Peak=44 MB, After=39 MB"
+    "detail": "RSS delta 5.0 MB during 499 MB stream. Before=78 MB, Peak=83 MB, After=78 MB"
   }
 ]

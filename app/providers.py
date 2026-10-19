@@ -25,6 +25,7 @@ class Transcript:
 class WhisperASR:
     _models: dict[str, Any] = {}
     _lock = __import__("threading").Lock()
+    _batched_pipe: Any = None
 
     def __init__(self, model_name: str = "small") -> None:
         from faster_whisper import WhisperModel
