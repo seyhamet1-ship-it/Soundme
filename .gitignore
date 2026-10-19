@@ -18,3 +18,7 @@ uploads/*
 *.sqlite3
 tests/fixtures/oversize.mp4
 tests/benchmark/
+tests/media/
+tests/fault_work_1min/
+tools/models/
+*.log

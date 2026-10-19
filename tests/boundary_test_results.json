@@ -1,0 +1,37 @@
+[
+  {
+    "test": "T1_499MB_ACCEPTED",
+    "status": "PASS",
+    "detail": "499 MiB (523239424 bytes) < limit (524288000 bytes). upload_init would accept this file."
+  },
+  {
+    "test": "T2_501MB_REJECTED",
+    "status": "PASS",
+    "detail": "501 MiB (525336576 bytes) > limit (524288000 bytes). upload_init returns 413 before any bytes are stored."
+  },
+  {
+    "test": "T2_NO_ORPHAN_CHUNKS",
+    "status": "PASS",
+    "detail": "No chunk directory created for rejected 501 MB upload. Existing chunk dirs: 4"
+  },
+  {
+    "test": "T3_31MIN_REJECTED",
+    "status": "PASS",
+    "detail": "probe() raised ValueError: Video duration (31.0 min) exceeds the 30-minute limit. រយៈពេលវីដេអូលើសពី 30 នាទី។"
+  },
+  {
+    "test": "T4_RESUME_STATE",
+    "status": "PASS",
+    "detail": "After cancel, 5/10 chunks remain. Client can resume by sending chunks [5, 6, 7, 8, 9]."
+  },
+  {
+    "test": "T4_CANCEL_CLEANUP",
+    "status": "PASS",
+    "detail": "Cancel cleanup removed da54a3b77ff14687be2c374da0fea5ad chunk directory completely."
+  },
+  {
+    "test": "T5_RSS_FLAT",
+    "status": "PASS",
+    "detail": "RSS delta 5.0 MB during 499 MB stream. Before=39 MB, Peak=44 MB, After=39 MB"
+  }
+]
