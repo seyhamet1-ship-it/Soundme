@@ -58,8 +58,11 @@ export default function App() {
       X(en ? 'Choose an MP4, MOV, MKV, AVI, or WEBM video.' : (t('invalid_video') + ' (Choose an MP4, MOV, MKV, AVI, or WEBM video.)'));
       return;
     }
-    if (f.size > 4096e6) {
-      X(en ? 'Maximum upload size is 4096 MB.' : t('upload_too_large'));
+    if (f.size > 500 * 1024 * 1024) {
+      let actualMb = (f.size / (1024 * 1024)).toFixed(1);
+      let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ 500 MB។`;
+      let enMsg = `File size (${actualMb} MB) exceeds the 500 MB limit.`;
+      X(`${kmMsg} (${enMsg})`);
       return;
     }
     if (f.size === 0) {
@@ -144,8 +147,11 @@ export default function App() {
       X(t('file_empty'));
       return;
     }
-    if (file.size > 4096e6) {
-      X(t('upload_too_large'));
+    if (file.size > 500 * 1024 * 1024) {
+      let actualMb = (file.size / (1024 * 1024)).toFixed(1);
+      let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ 500 MB។`;
+      let enMsg = `File size (${actualMb} MB) exceeds the 500 MB limit.`;
+      X(`${kmMsg} (${enMsg})`);
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -252,7 +258,7 @@ export default function App() {
             <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
             <b>＋</b>
             <strong>{file?.name || t('upload_heading')}</strong>
-            <span>MP4 · MOV · MKV · WEBM · 4096 MB max</span>
+            <span>MP4 · MOV · MKV · WEBM · 500 MB max</span>
           </label>
           {file && file.size > 0 && typeof URL.createObjectURL === 'function' && <video className="preview" controls src={URL.createObjectURL(file)} />}
           <div className="fields">

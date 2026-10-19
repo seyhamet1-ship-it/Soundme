@@ -45,7 +45,9 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 FRONTEND_DIR.mkdir(exist_ok=True, parents=True)
 
-MAX_VIDEO_SECONDS = int(os.getenv("MAX_DURATION_MIN", "90")) * 60
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_VIDEO_SECONDS = int(os.getenv("MAX_DURATION_MIN", "30")) * 60
 SUPPORTED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 
 

@@ -4,8 +4,8 @@ services:
     container_name: soundme-app
     restart: unless-stopped
     environment:
-      - MAX_DURATION_MIN=90
-      - MAX_UPLOAD_MB=4096
+      - MAX_DURATION_MIN=30
+      - MAX_UPLOAD_MB=500
       - ASR_MODEL=small
       - MAX_WORKERS=2
     volumes:

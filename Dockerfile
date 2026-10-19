@@ -18,9 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source
 COPY . .
 
-# Environment defaults for 60-minute video support
-ENV MAX_DURATION_MIN=90 \
-    MAX_UPLOAD_MB=4096 \
+# Environment defaults for 30-minute / 500 MB video support
+ENV MAX_DURATION_MIN=30 \
+    MAX_UPLOAD_MB=500 \
     PYTHONUNBUFFERED=1
 
 EXPOSE 8000

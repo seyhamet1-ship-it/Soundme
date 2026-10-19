@@ -140,16 +140,16 @@ STRINGS: dict[str, I18nEntry] = {
         en="File is empty. Please choose a valid video.",
     ),
     "upload_too_large": I18nEntry(
-        km="ទំហំឯកសារលើសពីកម្រិតកំណត់ 4096 MB។",
-        en="File exceeds the 4096 MB upload limit.",
+        km="ទំហំឯកសារលើសពីកម្រិតកំណត់ 500 MB។",
+        en="File exceeds the 500 MB upload limit.",
     ),
     "invalid_video": I18nEntry(
         km="ទ្រង់ទ្រាយវីដេអូមិនត្រឹមត្រូវ ឬខូច។",
         en="Invalid or corrupted video format.",
     ),
     "duration_too_long": I18nEntry(
-        km="រយៈពេលវីដេអូលើសពីកម្រិតកំណត់។",
-        en="Video duration exceeds the configured limit.",
+        km="រយៈពេលវីដេអូលើសពី 30 នាទី។",
+        en="Video duration exceeds the 30-minute limit.",
     ),
     "disk_space_low": I18nEntry(
         km="ទំហំថាសមិនគ្រប់គ្រាន់សម្រាប់ដំណើរការវីដេអូនេះ។",

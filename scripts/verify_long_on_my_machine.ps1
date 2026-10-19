@@ -1,8 +1,13 @@
-# Soundme 60-Minute Overnight Verification Script (Windows PowerShell)
-# Run: .\scripts\verify_long_on_my_machine.ps1
+param(
+    [int]$DurationMin = 30
+)
+$DurationSec = $DurationMin * 60
+
+# Soundme 30/60-Minute Verification Script (Windows PowerShell)
+# Run: .\scripts\verify_long_on_my_machine.ps1 [-DurationMin 30|60]
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " Soundme: 60-Minute Real-Mode Long-Video Verification" -ForegroundColor Cyan
+Write-Host " Soundme: $DurationMin-Minute Real-Mode Long-Video Verification" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 
 $ROOT = Split-Path -Parent $PSScriptRoot
@@ -19,9 +24,9 @@ try {
     Start-Sleep -Seconds 5
 }
 
-# 2. Generate 60-min test video (if not already present)
-Write-Host "`n[2/4] Verifying 60-minute test media..." -ForegroundColor Yellow
-python scripts\generate_long_test_media.py 3600
+# 2. Generate test video (defaults to 30 min, 60 optional)
+Write-Host "`n[2/4] Verifying $DurationMin-minute test media..." -ForegroundColor Yellow
+python scripts\generate_long_test_media.py $DurationSec
 
 # 3. Execute fault injection and pipeline quality assertions
 Write-Host "`n[3/4] Running long-video verification and fault injection..." -ForegroundColor Yellow

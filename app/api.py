@@ -7,7 +7,8 @@ from app.pipeline import process_video,probe,kill_job_process
 from app.storage import delete_job,get_idempotent_job,get_job,list_jobs,recover_jobs,set_idempotent_job,set_job,update_job
 from app.i18n import get_km
 router=APIRouter(); ROOT=Path(__file__).resolve().parents[1]; UPLOADS=ROOT/'uploads'; OUTPUTS=ROOT/'outputs'; UPLOADS.mkdir(exist_ok=True); OUTPUTS.mkdir(exist_ok=True)
-POOL=ThreadPoolExecutor(max_workers=2); LIMIT=int(os.getenv('MAX_UPLOAD_MB','4096'))
+POOL=ThreadPoolExecutor(max_workers=2)
+from app.config import MAX_UPLOAD_MB, MAX_UPLOAD_BYTES, MAX_VIDEO_SECONDS
 def worker(jid,path,opts): update_job(jid,started_at=time.time()); process_video(jid,path,opts)
 @router.post('/api/jobs',status_code=202)
 async def create_job(file:UploadFile=File(...),source_lang:str=Form('auto'),voice:str=Form('km-KH-SreymomNeural'),keep_background:bool=Form(False),burn_subtitles:bool=Form(False),review_before_tts:bool=Form(False),idempotency_key:str|None=Header(None,alias='Idempotency-Key')):
@@ -22,12 +23,18 @@ async def create_job(file:UploadFile=File(...),source_lang:str=Form('auto'),voic
   with path.open('wb') as out:
    while chunk:=await file.read(1024*1024):
     size+=len(chunk)
-    if size>LIMIT*1024*1024: raise HTTPException(413,get_km('upload_too_large'))
+    if size>MAX_UPLOAD_BYTES: raise HTTPException(413,get_km('upload_too_large'))
     out.write(chunk)
   if size==0: raise HTTPException(400,get_km('file_empty'))
   await asyncio.to_thread(probe,path)
  except HTTPException: shutil.rmtree(folder,ignore_errors=True); raise
- except Exception as exc: shutil.rmtree(folder,ignore_errors=True); raise HTTPException(400,get_km('invalid_video')) from exc
+ except Exception as exc:
+  shutil.rmtree(folder,ignore_errors=True)
+  err_msg = str(exc).lower()
+  if "duration" in err_msg: raise HTTPException(400, get_km('duration_too_long')) from exc
+  if "exceeds the 500 mb" in err_msg or "upload limit" in err_msg: raise HTTPException(413, get_km('upload_too_large')) from exc
+  if "disk" in err_msg: raise HTTPException(400, get_km('disk_space_low')) from exc
+  raise HTTPException(400,get_km('invalid_video')) from exc
  opts={'source_lang':source_lang,'voice':voice,'keep_background':keep_background,'burn_subtitles':burn_subtitles,'review_before_tts':review_before_tts}
  job_data={'id':jid,'status':'queued','stage':'queued','progress':0,'filename':path.name,'source_path':str(path),'options':opts}
  set_job(jid,job_data)
@@ -123,7 +130,7 @@ async def upload_init(payload: dict):
  total_size = int(payload.get('total_size', 0))
  chunk_size = int(payload.get('chunk_size', 5 * 1024 * 1024))
  if total_size <= 0: raise HTTPException(400, get_km('file_empty'))
- if total_size > LIMIT * 1024 * 1024: raise HTTPException(413, get_km('upload_too_large'))
+ if total_size > MAX_UPLOAD_BYTES: raise HTTPException(413, get_km('upload_too_large'))
  needed = total_size * 3
  free = shutil.disk_usage(UPLOADS).free
  if free < needed: raise HTTPException(400, get_km('disk_space_low'))
@@ -143,11 +150,17 @@ async def upload_chunk(uid: str, request: Request, x_chunk_index: int = Header(.
  meta = json.loads(meta_file.read_text(encoding='utf-8'))
  if x_chunk_index < 0 or x_chunk_index >= meta['total_chunks']: raise HTTPException(400, f'Invalid chunk index {x_chunk_index}')
  body = await request.body()
+ # Check cumulative size including this chunk (client might send more bytes than declared or exceed limit)
+ current_part = u_folder / f'{x_chunk_index:06d}.part'
+ existing_this = current_part.stat().st_size if current_part.exists() else 0
+ existing_other = sum(p.stat().st_size for p in u_folder.glob('*.part')) - existing_this
+ if existing_other + len(body) > MAX_UPLOAD_BYTES:
+  shutil.rmtree(u_folder, ignore_errors=True)
+  raise HTTPException(413, get_km('upload_too_large'))
  if x_chunk_checksum:
   c_hash = hashlib.sha256(body).hexdigest()
   if c_hash.lower() != x_chunk_checksum.lower(): raise HTTPException(400, 'Chunk checksum mismatch')
- chunk_file = u_folder / f'{x_chunk_index:06d}.part'
- chunk_file.write_bytes(body)
+ current_part.write_bytes(body)
  received = [int(p.stem) for p in u_folder.glob('*.part')]
  return {'upload_id': uid, 'chunk_index': x_chunk_index, 'chunks_received': len(received), 'total_chunks': meta['total_chunks']}
 
@@ -191,11 +204,21 @@ async def upload_complete(uid: str, payload: dict | None = None):
    for p in parts:
     with p.open('rb') as in_f: shutil.copyfileobj(in_f, out_f)
   if target_path.stat().st_size != meta['total_size']: raise ValueError('Assembled file size does not match expected total_size')
+  if target_path.stat().st_size > MAX_UPLOAD_BYTES:
+   raise HTTPException(413, get_km('upload_too_large'))
   await asyncio.to_thread(probe, target_path)
  except HTTPException:
   shutil.rmtree(job_folder, ignore_errors=True); shutil.rmtree(u_folder, ignore_errors=True); raise
  except Exception as exc:
-  shutil.rmtree(job_folder, ignore_errors=True); shutil.rmtree(u_folder, ignore_errors=True); raise HTTPException(400, get_km('invalid_video')) from exc
+  shutil.rmtree(job_folder, ignore_errors=True); shutil.rmtree(u_folder, ignore_errors=True)
+  err_msg = str(exc).lower()
+  if "duration" in err_msg:
+   raise HTTPException(400, get_km('duration_too_long')) from exc
+  if "exceeds the 500 mb" in err_msg or "upload limit" in err_msg:
+   raise HTTPException(413, get_km('upload_too_large')) from exc
+  if "disk" in err_msg:
+   raise HTTPException(400, get_km('disk_space_low')) from exc
+  raise HTTPException(400, get_km('invalid_video')) from exc
  shutil.rmtree(u_folder, ignore_errors=True)
  opts = {'source_lang': source_lang, 'voice': voice, 'keep_background': keep_background, 'burn_subtitles': burn_subtitles, 'review_before_tts': review_before_tts}
  job_data = {'id': jid, 'status': 'queued', 'stage': 'queued', 'progress': 0, 'filename': target_path.name, 'source_path': str(target_path), 'options': opts}

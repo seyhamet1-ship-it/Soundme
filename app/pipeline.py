@@ -30,11 +30,21 @@ def probe(path:Path)->dict[str,Any]:
  data=json.loads(run([FFPROBE,"-v","error","-show_streams","-show_format","-of","json",str(path)]).stdout)
  if not any(x["codec_type"]=="video" for x in data.get("streams",[])): raise ValueError("The uploaded file has no video stream.")
  duration=float(data.get("format",{}).get("duration",0))
- max_dur=float(os.getenv("MAX_DURATION_MIN","90"))*60
- if duration<=0 or duration>max_dur: raise ValueError("Video duration is invalid or exceeds the configured limit.")
+ from app.config import MAX_VIDEO_SECONDS, MAX_UPLOAD_BYTES
+ if duration<=0: raise ValueError("Video duration is invalid (0 or negative).")
+ if duration>MAX_VIDEO_SECONDS:
+  from app.i18n import get_km
+  actual_min=round(duration/60,1)
+  max_min=MAX_VIDEO_SECONDS//60
+  raise ValueError(f"Video duration ({actual_min} min) exceeds the {max_min}-minute limit. " + get_km("duration_too_long"))
+ file_size=path.stat().st_size
+ if file_size>MAX_UPLOAD_BYTES:
+  from app.i18n import get_km
+  actual_mb=round(file_size/1024/1024,1)
+  max_mb=MAX_UPLOAD_BYTES//1024//1024
+  raise ValueError(f"File size ({actual_mb} MB) exceeds the {max_mb} MB limit. " + get_km("upload_too_large"))
  # Disk space pre-check: need ~3x input size for intermediate files
  import shutil as _shutil
- file_size=path.stat().st_size
  needed=file_size*3
  free=_shutil.disk_usage(path.parent).free
  if free<needed:
@@ -46,6 +56,8 @@ def failure_error(exc:BaseException)->dict[str,Any]:
  message=str(exc)[:500]; lower=message.lower()
  if message.startswith("TTS_UNAVAILABLE"): return {"code":"TTS_UNAVAILABLE","message_en":message,"message_km":get_km("tts_unavailable")}
  if "TTS_EMPTY_TEXT" in message: return {"code":"TTS_EMPTY_TEXT","message_en":message,"message_km":get_km("tts_empty_text")}
+ if "duration" in lower or "30-minute" in lower: return {"code":"DURATION_TOO_LONG","message_en":message,"message_km":get_km("duration_too_long")}
+ if "upload limit" in lower or "500 mb" in lower or "upload_too_large" in lower: return {"code":"UPLOAD_TOO_LARGE","message_en":message,"message_km":get_km("upload_too_large")}
  if "no audio track" in lower: return {"code":"NO_AUDIO_TRACK","message_en":message,"message_km":get_km("no_audio_track")}
  if "no speech was detected" in lower or "no speech detected" in lower: return {"code":"NO_SPEECH_DETECTED","message_en":message,"message_km":get_km("no_speech_detected")}
  if "no video stream" in lower: return {"code":"NO_VIDEO_STREAM","message_en":message,"message_km":get_km("no_video_stream")}
@@ -76,11 +88,15 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
   update_job(job_id,detected_language=transcript.language,stage="translate",progress=38); providers=[]
-  for s in segments:
+  from app.providers import translate_khmer_batch
+  source_texts = [s.source_text for s in segments]
+  translated_km, p = translate_khmer_batch(source_texts, transcript.language)
+  for s, km in zip(segments, translated_km):
    if (get_job(job_id) or {}).get("status") == "canceled":
     if root.exists(): shutil.rmtree(root, ignore_errors=True)
     return
-   s.text_km,p=translate_khmer(s.source_text,transcript.language); s.text_km=normalize_numbers(s.text_km); providers.append(p)
+   s.text_km = normalize_numbers(km)
+   providers.append(p)
   if opts.get("review_before_tts"):
    update_job(job_id,status="awaiting_review",stage="review",progress=50,segments=[s.__dict__ for s in segments],providers=providers); return
   if (get_job(job_id) or {}).get("status") == "canceled":
