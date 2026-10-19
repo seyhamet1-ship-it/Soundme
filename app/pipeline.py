@@ -66,6 +66,12 @@ def failure_error(exc:BaseException)->dict[str,Any]:
  return {"code":"PROCESSING_FAILED","message_en":message,"message_km":get_km("processing_failed")}
 def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->None:
  opts=options or {}; root=Path(source_path).parent; source=Path(source_path); started=time.time()
+ counters: dict[str, Any] = {
+  "extract_skipped": False,
+  "asr_total": 0, "asr_skipped": 0, "asr_computed": 0,
+  "translate_total": 0, "translate_skipped": 0, "translate_computed": 0,
+  "tts_total": 0, "tts_skipped": 0, "tts_cached": 0, "tts_computed": 0,
+ }
  try:
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
@@ -77,33 +83,86 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
   update_job(job_id,stage="extract",progress=8)
-  run([FFMPEG,"-y","-i",str(source),"-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le",str(wav)], job_id=job_id)
+  if not (wav.exists() and wav.stat().st_size > 1000):
+   run([FFMPEG,"-y","-i",str(source),"-map","0:a:0","-vn","-ac","1","-ar","16000","-c:a","pcm_s16le",str(wav)], job_id=job_id)
+  else:
+   counters["extract_skipped"] = True
+   log.info("Job %s: Audio extraction checkpoint hit; skipped extract", job_id)
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
-  update_job(job_id,stage="transcribe",progress=18); transcript=WhisperASR(os.getenv("ASR_MODEL","small")).transcribe(wav,opts.get("source_lang","auto"))
+  update_job(job_id,stage="transcribe",progress=18)
+  asr_ckpt = root / "asr_checkpoint.json"
+  if asr_ckpt.exists():
+   try:
+    asr_data = json.loads(asr_ckpt.read_text(encoding="utf-8"))
+    import types
+    raw_segs = [types.SimpleNamespace(**s) for s in asr_data["segments"]]
+    from app.providers import Transcript
+    transcript = Transcript(raw_segs, asr_data["language"], float(asr_data.get("probability", 1.0)))
+    counters["asr_total"] = len(raw_segs)
+    counters["asr_skipped"] = len(raw_segs)
+    counters["asr_computed"] = 0
+    log.info("Job %s: ASR checkpoint hit; skipped %d segments", job_id, len(raw_segs))
+   except Exception:
+    transcript = WhisperASR(os.getenv("ASR_MODEL","small")).transcribe(wav,opts.get("source_lang","auto"))
+    counters["asr_total"] = len(transcript.segments)
+    counters["asr_skipped"] = 0
+    counters["asr_computed"] = len(transcript.segments)
+  else:
+   transcript = WhisperASR(os.getenv("ASR_MODEL","small")).transcribe(wav,opts.get("source_lang","auto"))
+   counters["asr_total"] = len(transcript.segments)
+   counters["asr_skipped"] = 0
+   counters["asr_computed"] = len(transcript.segments)
+   asr_ckpt.write_text(json.dumps({
+    "language": transcript.language,
+    "probability": transcript.language_probability,
+    "segments": [{"start": float(s.start), "end": float(s.end), "text": str(s.text).strip()} for s in transcript.segments]
+   }, ensure_ascii=False, indent=2), encoding="utf-8")
   segments=[Segment(i+1,float(s.start),float(s.end),str(s.text).strip()) for i,s in enumerate(transcript.segments) if str(s.text).strip()]
   if not segments: raise ValueError("No speech was detected. Try a video with audible speech.")
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
-  update_job(job_id,detected_language=transcript.language,stage="translate",progress=38); providers=[]
-  from app.providers import translate_khmer_batch
-  source_texts = [s.source_text for s in segments]
-  translated_km, p = translate_khmer_batch(source_texts, transcript.language)
-  for s, km in zip(segments, translated_km):
-   if (get_job(job_id) or {}).get("status") == "canceled":
-    if root.exists(): shutil.rmtree(root, ignore_errors=True)
-    return
-   s.text_km = normalize_numbers(km)
-   providers.append(p)
+  update_job(job_id,detected_language=transcript.language,stage="translate",progress=38)
+  trans_ckpt = root / "translation_checkpoint.json"
+  saved_trans = {}
+  if trans_ckpt.exists():
+   try: saved_trans = json.loads(trans_ckpt.read_text(encoding="utf-8"))
+   except Exception: saved_trans = {}
+  providers = []
+  missing_indices = []
+  missing_texts = []
+  for idx, s in enumerate(segments):
+   key = str(s.id)
+   if key in saved_trans and saved_trans[key].get("text_km"):
+    s.text_km = normalize_numbers(saved_trans[key]["text_km"])
+    providers.append(saved_trans[key].get("provider", "nllb-checkpoint"))
+    counters["translate_skipped"] += 1
+   else:
+    providers.append("")
+    missing_indices.append(idx)
+    missing_texts.append(s.source_text)
+  counters["translate_total"] = len(segments)
+  if missing_texts:
+   from app.providers import translate_khmer_batch
+   trans_batch, p = translate_khmer_batch(missing_texts, transcript.language)
+   counters["translate_computed"] = len(trans_batch)
+   for idx, km in zip(missing_indices, trans_batch):
+    segments[idx].text_km = normalize_numbers(km)
+    providers[idx] = p
+    saved_trans[str(segments[idx].id)] = {"text_km": segments[idx].text_km, "provider": p, "source": segments[idx].source_text}
+   trans_ckpt.write_text(json.dumps(saved_trans, ensure_ascii=False, indent=2), encoding="utf-8")
+  else:
+   counters["translate_computed"] = 0
+   log.info("Job %s: Translation checkpoint hit; skipped %d segments", job_id, len(segments))
   if opts.get("review_before_tts"):
    update_job(job_id,status="awaiting_review",stage="review",progress=50,segments=[s.__dict__ for s in segments],providers=providers); return
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return
   from app.render import render
-  render(job_id,source,root,segments,duration,opts,transcript,providers,video,started)
+  render(job_id,source,root,segments,duration,opts,transcript,providers,video,started,counters=counters)
  except Exception as exc:
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)

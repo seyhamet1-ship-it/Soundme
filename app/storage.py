@@ -37,4 +37,14 @@ def delete_job(job_id:str)->None:
 def recover_jobs()->None:
  from app.i18n import get_km
  for job in list_jobs():
-  if job.get("status") in {"queued","running"}: update_job(job["id"],status="failed",stage="failed",error={"code":"SERVER_RESTARTED","message_en":"Job interrupted by server restart.","message_km":get_km("server_restarted")})
+  if job.get("status") in {"queued","running"}:
+   src = Path(job.get("source_path") or "")
+   if src.is_file() and src.stat().st_size > 0:
+    try:
+     from app.api import POOL, worker
+     update_job(job["id"], status="queued", stage="resuming")
+     POOL.submit(worker, job["id"], str(src), job.get("options", {}))
+     continue
+    except Exception:
+     pass
+   update_job(job["id"],status="failed",stage="failed",error={"code":"SERVER_RESTARTED","message_en":"Job interrupted by server restart.","message_km":get_km("server_restarted")})

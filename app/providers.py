@@ -65,17 +65,50 @@ class WhisperASR:
         samples = self._load_wav(audio)
         audio_input = samples if samples is not None else str(audio)
         beam_size = int(os.getenv("ASR_BEAM_SIZE", "1"))
+        use_batched = os.getenv("ASR_BATCHED", "1") != "0"
+
+        if use_batched:
+            try:
+                import types
+                from faster_whisper import BatchedInferencePipeline
+                with WhisperASR._lock:
+                    if not hasattr(self, "_batched_pipe") or self._batched_pipe is None:
+                        self._batched_pipe = BatchedInferencePipeline(model=self.model)
+                batch_size = int(os.getenv("ASR_BATCH_SIZE", "8"))
+                segments, info = self._batched_pipe.transcribe(
+                    audio_input, batch_size=batch_size, language=language, word_timestamps=True
+                )
+                sentence_segs = []
+                for s in segments:
+                    if not hasattr(s, "words") or not s.words:
+                        sentence_segs.append(s)
+                        continue
+                    cur = []
+                    for w in s.words:
+                        cur.append(w)
+                        word_clean = w.word.strip()
+                        if any(word_clean.endswith(p) for p in [".", "!", "?", "。", "！", "？"]):
+                            sentence_segs.append(types.SimpleNamespace(
+                                start=cur[0].start, end=cur[-1].end, text="".join(x.word for x in cur).strip()
+                            ))
+                            cur = []
+                    if cur:
+                        sentence_segs.append(types.SimpleNamespace(
+                            start=cur[0].start, end=cur[-1].end, text="".join(x.word for x in cur).strip()
+                        ))
+                segs = sentence_segs if sentence_segs else list(segments)
+                if segs:
+                    return Transcript(segs, info.language, float(info.language_probability))
+            except Exception as b_exc:
+                log.warning("BatchedInferencePipeline failed (%s); falling back to standard transcribe", b_exc)
+
         try:
             segments, info = self.model.transcribe(audio_input, language=language, vad_filter=True, beam_size=beam_size)
             segs = list(segments)
         except ValueError as exc:
             if "max() iterable argument is empty" in str(exc):
-                # Silero VAD found zero speech chunks -> no audible speech in audio
                 return Transcript([], "en", 0.0)
-            import logging as _logging
-            _logging.getLogger("dubber.providers").warning(
-                "VAD error (%s); retrying without vad_filter", exc
-            )
+            log.warning("VAD error (%s); retrying without vad_filter", exc)
             segments, info = self.model.transcribe(audio_input, language=language, vad_filter=False, beam_size=beam_size)
             segs = list(segments)
         return Transcript(segs, info.language, float(info.language_probability))

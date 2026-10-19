@@ -10,10 +10,17 @@ from app.storage import get_job, update_job
 from app.pipeline import run
 import shutil
 FFMPEG=os.getenv("FFMPEG","ffmpeg"); FFPROBE=os.getenv("FFPROBE","ffprobe")
-def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:float,opts:dict[str,Any],transcript:Any,providers:list[str],video_stream:dict[str,Any],started:float)->None:
+def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:float,opts:dict[str,Any],transcript:Any,providers:list[str],video_stream:dict[str,Any],started:float,counters:dict[str,Any]|None=None)->None:
  if (get_job(job_id) or {}).get("status") == "canceled":
   if root.exists(): shutil.rmtree(root, ignore_errors=True)
   return
+ ctr = counters if counters is not None else {}
+ ctr.setdefault("tts_total", len(segments))
+ ctr.setdefault("tts_skipped", 0)
+ ctr.setdefault("tts_cached", 0)
+ ctr.setdefault("tts_computed", 0)
+ from app.long_video import compute_content_hash, get_cached_segment_audio, store_cached_segment_audio
+
  dub=np.zeros(int(duration*48000),dtype=np.float32); speech=[]; tts=[]; fit_stats=[]; prev_end=0.0; demo_audio=False; update_job(job_id,stage="voice",progress=54)
  for idx,s in enumerate(segments):
   if (get_job(job_id) or {}).get("status") == "canceled":
@@ -22,15 +29,31 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
   if not s.text_km.strip(): raise ValueError("Khmer translation is empty.")
   if providers[idx].startswith("nllb") and not is_khmer_text(s.text_km): raise ValueError("Translation provider returned non-Khmer text.")
   slot=max(.2,s.end-s.start); out=root/f"voice-{idx:04}.wav"
-  est_dur=len(s.text_km.strip())/12.0
-  rate_pct=min(30,max(0,int(round((est_dur/slot-1.0)*100)))) if est_dur>slot else 0
-  tts_rate=f"+{rate_pct}%"
-  tts_provider=synthesize_khmer(s.text_km,opts.get("voice","km-KH-SreymomNeural"),out,slot,idx+1,rate=tts_rate); tts.append(tts_provider)
-  demo_audio=tts_provider.startswith("demo")
-  if demo_audio:
-   if tts_provider!="demo-tone-not-speech" or os.getenv("DEMO_MODE","").strip().lower() not in {"1","true","yes"}: raise ValueError(f"Non-speech/demo TTS provider cannot complete a dubbing job: {tts_provider}")
-  elif tts_provider not in {"edge-tts","azure-speech"} and not tts_provider.startswith("mms-"): raise ValueError(f"Unrecognized TTS provider cannot complete a dubbing job: {tts_provider}")
-  else: require_real_speech(out)
+  voice=opts.get("voice","km-KH-SreymomNeural")
+  content_h=compute_content_hash(s.text_km, voice, slot)
+  cached_disk=get_cached_segment_audio(content_h)
+
+  if out.exists() and out.stat().st_size > 1000:
+   tts_provider = "checkpoint"
+   ctr["tts_skipped"] += 1
+  elif cached_disk is not None and cached_disk.stat().st_size > 1000:
+   shutil.copyfile(cached_disk, out)
+   tts_provider = "content-cache"
+   ctr["tts_cached"] += 1
+  else:
+   est_dur=len(s.text_km.strip())/12.0
+   rate_pct=min(30,max(0,int(round((est_dur/slot-1.0)*100)))) if est_dur>slot else 0
+   tts_rate=f"+{rate_pct}%"
+   tts_provider=synthesize_khmer(s.text_km,voice,out,slot,idx+1,rate=tts_rate)
+   demo_audio=tts_provider.startswith("demo")
+   if demo_audio:
+    if tts_provider!="demo-tone-not-speech" or os.getenv("DEMO_MODE","").strip().lower() not in {"1","true","yes"}: raise ValueError(f"Non-speech/demo TTS provider cannot complete a dubbing job: {tts_provider}")
+   elif tts_provider not in {"edge-tts","azure-speech"} and not tts_provider.startswith("mms-"): raise ValueError(f"Unrecognized TTS provider cannot complete a dubbing job: {tts_provider}")
+   else: require_real_speech(out)
+   try: store_cached_segment_audio(content_h, out)
+   except Exception: pass
+   ctr["tts_computed"] += 1
+  tts.append(tts_provider)
   with wave.open(str(out),"rb") as f: rate=f.getframerate(); data=np.frombuffer(f.readframes(f.getnframes()),dtype="<i2").astype(np.float32)/32768
   raw_dur=len(data)/rate
   tempo=min(1.25,max(1.0,raw_dur/slot)) if raw_dur>slot else 1.0
@@ -42,13 +65,13 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
   start_idx=int(start_sec*48000); end_idx=min(len(dub),start_idx+len(res))
   if start_idx<len(dub): dub[start_idx:end_idx]+=res[:end_idx-start_idx]
   prev_end=start_sec+fitted_dur; speech.append(fitted_dur)
-  stat={"segment_id":s.id,"slot":round(slot,3),"raw_dur":round(raw_dur,3),"tts_rate":tts_rate,"atempo":round(tempo,2),"final_dur":round(fitted_dur,3),"overlap_ms":round(overlap_ms,1)}
+  stat={"segment_id":s.id,"slot":round(slot,3),"raw_dur":round(raw_dur,3),"atempo":round(tempo,2),"final_dur":round(fitted_dur,3),"overlap_ms":round(overlap_ms,1)}
   fit_stats.append(stat)
  peak=float(np.max(np.abs(dub))) if len(dub) else 0
  if peak: dub*=min(.89,.89/peak)
  audio=root/"dub.wav"
  with wave.open(str(audio),"wb") as f: f.setnchannels(1);f.setsampwidth(2);f.setframerate(48000);f.writeframes((np.clip(dub,-.89,.89)*32767).astype("<i2").tobytes())
- (root/"transcript.json").write_text(json.dumps({"detected_language":transcript.language,"language_probability":transcript.language_probability,"mode":"demo-plumbing" if demo_audio else "real","segments":[s.__dict__ for s in segments],"translation_providers":providers,"tts_providers":tts,"fit_stats":fit_stats},ensure_ascii=False,indent=2),encoding="utf-8")
+ (root/"transcript.json").write_text(json.dumps({"detected_language":transcript.language,"language_probability":transcript.language_probability,"mode":"demo-plumbing" if demo_audio else "real","segments":[s.__dict__ for s in segments],"translation_providers":providers,"tts_providers":tts,"fit_stats":fit_stats,"counters":ctr},ensure_ascii=False,indent=2),encoding="utf-8")
  (root/"subtitles.srt").write_text(write_srt(segments),encoding="utf-8"); (root/"subtitles.vtt").write_text(write_vtt(segments),encoding="utf-8")
  update_job(job_id,stage="mix",progress=82); video=root/"dubbed.mp4"; args=[FFMPEG,"-y","-i",str(source),"-i",str(audio),"-map","0:v:0","-map","1:a:0"]
  if opts.get("keep_background"):
@@ -56,4 +79,4 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
  args += ["-c:v","copy" if video_stream.get("codec_name") in {"h264","av1"} and not opts.get("burn_subtitles") else "libx264","-preset","veryfast","-c:a","aac","-b:a","192k","-t",str(duration),"-movflags","+faststart"]
  if opts.get("burn_subtitles"):
   path=str(root/"subtitles.srt").replace("\\","/").replace(":","\\:").replace("'","\\'"); args += ["-vf",f"subtitles='{path}':force_style='FontName=Khmer OS,FontSize=24,Outline=2,Shadow=1,MarginV=30'"]
- run(args+[str(video)]); update_job(job_id,status="completed",stage="done",progress=100,outputs={"video":video.name,"audio":audio.name,"srt":"subtitles.srt","vtt":"subtitles.vtt","json":"transcript.json"},detected_language=transcript.language,providers={"translation":sorted(set(providers)),"tts":sorted(set(tts))},segments=[s.__dict__ for s in segments],timings={"segment_durations":speech,"processing_seconds":round(time.time()-started,2),"fit_stats":fit_stats})
+ run(args+[str(video)]); update_job(job_id,status="completed",stage="done",progress=100,outputs={"video":video.name,"audio":audio.name,"srt":"subtitles.srt","vtt":"subtitles.vtt","json":"transcript.json"},detected_language=transcript.language,providers={"translation":sorted(set(providers)),"tts":sorted(set(tts))},segments=[s.__dict__ for s in segments],timings={"segment_durations":speech,"processing_seconds":round(time.time()-started,2),"fit_stats":fit_stats,"counters":ctr})

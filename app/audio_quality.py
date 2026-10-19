@@ -40,16 +40,10 @@ def is_real_speech(
         from faster_whisper.vad import get_vad_model  # type: ignore[import-untyped]
 
         model = get_vad_model()
-        state, context = model.get_initial_states(batch_size=1)
         vad_window = 512
-        probs = []
-        for offset in range(0, signal.size, vad_window):
-            chunk = signal[offset : offset + vad_window]
-            if len(chunk) < vad_window:
-                chunk = np.pad(chunk, (0, vad_window - len(chunk)))
-            prob, state, context = model(chunk, state, context, target_rate)
-            probs.append(float(np.squeeze(prob)))
-        probabilities = np.asarray(probs, dtype=np.float32)
+        pad_len = (vad_window - (signal.size % vad_window)) % vad_window
+        padded_signal = np.pad(signal, (0, pad_len)) if pad_len else signal
+        probabilities = np.asarray(model(padded_signal), dtype=np.float32).reshape(-1)
     else:
         probabilities = np.asarray(vad(signal), dtype=np.float32).reshape(-1)
     if probabilities.size == 0 or float(np.mean(probabilities > 0.5)) <= 0.5:

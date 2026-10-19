@@ -1,0 +1,67 @@
+[
+  {
+    "test": "INTERRUPT_TRIGGER",
+    "status": "PASS",
+    "detail": "Worker terminated at ~50% with 10 voice segments"
+  },
+  {
+    "test": "CHECKPOINTS_PERSISTED",
+    "status": "PASS",
+    "detail": "All intermediate checkpoints and 10 voice segments persisted on disk"
+  },
+  {
+    "test": "JOB_COMPLETION",
+    "status": "PASS",
+    "detail": "Job completed cleanly after resumption in 102.65s"
+  },
+  {
+    "test": "ASR_NOT_RECOMPUTED",
+    "status": "PASS",
+    "detail": "ASR completely skipped (60/60 segments from checkpoint)"
+  },
+  {
+    "test": "TRANSLATION_NOT_RECOMPUTED",
+    "status": "PASS",
+    "detail": "Translation completely skipped (60/60 segments from checkpoint)"
+  },
+  {
+    "test": "TTS_NOT_RECOMPUTED",
+    "status": "PASS",
+    "detail": "Finished TTS segments preserved: skipped=10, cached=3, computed=47"
+  },
+  {
+    "test": "OUTPUT_STREAMS",
+    "status": "PASS",
+    "detail": "1 video stream + 1 audio stream"
+  },
+  {
+    "test": "OUTPUT_DURATION_DELTA",
+    "status": "PASS",
+    "detail": "Output=286.80s, Input=286.80s, Delta=0.000s <= 0.5s"
+  },
+  {
+    "test": "OUTPUT_PEAK_LEVEL",
+    "status": "PASS",
+    "detail": "Peak = -6.2 dBFS <= -1 dBFS"
+  },
+  {
+    "test": "OUTPUT_KHMER_SCRIPT",
+    "status": "PASS",
+    "detail": "60/60 segments Khmer script (100% >= 90%)"
+  },
+  {
+    "test": "OUTPUT_NO_CJK",
+    "status": "PASS",
+    "detail": "No CJK characters present in Khmer translations"
+  },
+  {
+    "test": "OUTPUT_SRT_MONOTONIC",
+    "status": "PASS",
+    "detail": "SRT start timestamps monotonic (60 entries)"
+  },
+  {
+    "test": "DEAD_PROCESS_CLEANUP",
+    "status": "PASS",
+    "detail": "Dead running job marked 'failed' with SERVER_RESTARTED code and bilingual message: {'code': 'SERVER_RESTARTED', 'message_en': 'Job interrupted by server restart.', 'message_km': 'ម៉ាស៊ីនមេបានចាប់ផ្ដើមឡើងវិញ។'}"
+  }
+]
