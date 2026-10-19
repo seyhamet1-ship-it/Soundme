@@ -224,14 +224,16 @@ def run_benchmark(duration_min: int, lang: str = "en") -> dict:
     rss_samples.append(measure_rss_kb())
     print(f"  asr: {stats['stages']['asr']:.2f}s ({len(segments)} segments)")
 
-    # 4. Translate
+    # 4. Translate (batched)
     t0 = time.monotonic()
-    for s in segments:
-        s.text_km, _ = translate_khmer(s.source_text, transcript.language)
-        s.text_km = normalize_numbers(s.text_km)
+    from app.providers import translate_khmer_batch
+    source_texts = [s.source_text for s in segments]
+    translated_km, _ = translate_khmer_batch(source_texts, transcript.language)
+    for s, km in zip(segments, translated_km):
+        s.text_km = normalize_numbers(km)
     stats["stages"]["translate"] = round(time.monotonic() - t0, 2)
     rss_samples.append(measure_rss_kb())
-    print(f"  translate: {stats['stages']['translate']:.2f}s")
+    print(f"  translate: {stats['stages']['translate']:.2f}s (batched)")
 
     # 5. TTS
     t0 = time.monotonic()
@@ -254,6 +256,60 @@ def run_benchmark(duration_min: int, lang: str = "en") -> dict:
     stats["tts_failures"] = tts_failures
     rss_samples.append(measure_rss_kb())
     print(f"  tts: {stats['stages']['tts']:.2f}s (retries={tts_retries}, failures={tts_failures})")
+
+    # 6. Fit & Mix
+    t0 = time.monotonic()
+    import wave
+    import numpy as np
+    dub = np.zeros(int(duration_s * 48000), dtype=np.float32)
+    prev_end = 0.0
+    for idx, s in enumerate(segments):
+        out_wav = workdir / f"voice-{idx:04d}.wav"
+        if not out_wav.exists():
+            continue
+        slot = max(0.2, s.end - s.start)
+        with wave.open(str(out_wav), "rb") as f:
+            rate = f.getframerate()
+            data = np.frombuffer(f.readframes(f.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+        raw_dur = len(data) / rate
+        tempo = min(1.25, max(1.0, raw_dur / slot)) if raw_dur > slot else 1.0
+        if tempo > 1.0:
+            data = np.interp(np.arange(int(len(data) / tempo)) * tempo, np.arange(len(data)), data).astype(np.float32)
+        res = np.interp(np.arange(int(len(data) * 48000 / rate)) * rate / 48000, np.arange(len(data)), data).astype(np.float32)
+        fitted_dur = len(res) / 48000.0
+        start_sec = max(s.start, prev_end - 0.08) if prev_end > 0 else s.start
+        start_idx = int(start_sec * 48000)
+        end_idx = min(len(dub), start_idx + len(res))
+        if start_idx < len(dub):
+            dub[start_idx:end_idx] += res[:end_idx - start_idx]
+        prev_end = start_sec + fitted_dur
+    peak = float(np.max(np.abs(dub))) if len(dub) else 0.0
+    if peak > 0:
+        dub *= min(0.89, 0.89 / peak)
+    dub_wav = workdir / "dub.wav"
+    with wave.open(str(dub_wav), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(48000)
+        f.writeframes((np.clip(dub, -0.89, 0.89) * 32767).astype("<i2").tobytes())
+    stats["stages"]["fit_mix"] = round(time.monotonic() - t0, 2)
+    rss_samples.append(measure_rss_kb())
+    print(f"  fit_mix: {stats['stages']['fit_mix']:.2f}s")
+
+    # 7. Mux
+    t0 = time.monotonic()
+    out_mp4 = workdir / "dubbed.mp4"
+    mux_cmd = [
+        FFMPEG, "-y", "-i", str(video_path), "-i", str(dub_wav),
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        "-t", str(duration_s), "-movflags", "+faststart",
+        str(out_mp4)
+    ]
+    subprocess.run(mux_cmd, check=True, capture_output=True)
+    stats["stages"]["mux"] = round(time.monotonic() - t0, 2)
+    rss_samples.append(measure_rss_kb())
+    print(f"  mux: {stats['stages']['mux']:.2f}s")
 
     # 6. Disk usage
     disk_kb = sum(f.stat().st_size for f in workdir.rglob("*") if f.is_file()) // 1024
@@ -288,8 +344,8 @@ def write_benchmarks_md(results: list[dict]):
         "",
         "## Per-Stage Wall-Clock (seconds)",
         "",
-        "| Duration | Probe | Extract | ASR | Translate | TTS | Total | Segments | TTS Retries | Peak RSS (MB) | Disk (MB) | Per-Hour (min) |",
-        "|----------|-------|---------|-----|-----------|-----|-------|----------|-------------|---------------|-----------|----------------|",
+        "| Duration | Probe | Extract | ASR | Translate | TTS | Fit/Mix | Mux | Total | Segments | TTS Retries | Peak RSS (MB) | Disk (MB) | Per-Hour (min) |",
+        "|----------|-------|---------|-----|-----------|-----|---------|-----|-------|----------|-------------|---------------|-----------|----------------|",
     ]
 
     for r in results:
@@ -297,6 +353,7 @@ def write_benchmarks_md(results: list[dict]):
         lines.append(
             f"| {r['duration_min']} min | {s.get('probe',0):.1f} | {s.get('extract',0):.1f} "
             f"| {s.get('asr',0):.1f} | {s.get('translate',0):.1f} | {s.get('tts',0):.1f} "
+            f"| {s.get('fit_mix',0):.1f} | {s.get('mux',0):.1f} "
             f"| {s.get('total',0):.1f} | {r['total_segments']} | {r['tts_retries']} "
             f"| {r['peak_rss_kb']/1024:.0f} | {r['disk_use_kb']/1024:.1f} "
             f"| {r['per_hour_min']:.1f} |"
@@ -335,9 +392,18 @@ def write_benchmarks_md(results: list[dict]):
 
 
 if __name__ == "__main__":
+    # Pre-warm models so benchmark measures pure execution throughput
+    print("Pre-warming ASR and Translator models...")
+    t_warm = time.time()
+    from app.providers import WhisperASR, NllbTranslator
+    WhisperASR(os.getenv("ASR_MODEL", "small"))
+    NllbTranslator().translate("Hello world", "en")
+    print(f"Models warmed in {time.time() - t_warm:.1f}s!\n")
+
     # Run benchmark ladder
     results = []
-    for dur in [1, 5, 15]:
+    durs = [int(a) for a in sys.argv[1:]] if len(sys.argv) > 1 else [1, 5, 15]
+    for dur in durs:
         try:
             r = run_benchmark(dur, "en")
             results.append(r)

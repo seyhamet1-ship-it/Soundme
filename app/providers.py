@@ -23,11 +23,19 @@ class Transcript:
 
 
 class WhisperASR:
+    _models: dict[str, Any] = {}
+    _lock = __import__("threading").Lock()
+
     def __init__(self, model_name: str = "small") -> None:
         from faster_whisper import WhisperModel
         device = "cuda" if os.getenv("ASR_DEVICE", "cpu").lower() == "cuda" else "cpu"
         compute = "float16" if device == "cuda" else "int8"
-        self.model = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=4)
+        cpu_threads = int(os.getenv("ASR_THREADS", "6"))
+        key = f"{model_name}:{device}:{compute}:{cpu_threads}"
+        with WhisperASR._lock:
+            if key not in WhisperASR._models:
+                WhisperASR._models[key] = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=cpu_threads)
+            self.model = WhisperASR._models[key]
 
     @staticmethod
     def _load_wav(path: Path) -> "np.ndarray | None":
@@ -56,8 +64,9 @@ class WhisperASR:
         language = None if source_lang == "auto" else source_lang
         samples = self._load_wav(audio)
         audio_input = samples if samples is not None else str(audio)
+        beam_size = int(os.getenv("ASR_BEAM_SIZE", "1"))
         try:
-            segments, info = self.model.transcribe(audio_input, language=language, vad_filter=True, beam_size=3)
+            segments, info = self.model.transcribe(audio_input, language=language, vad_filter=True, beam_size=beam_size)
             segs = list(segments)
         except ValueError as exc:
             if "max() iterable argument is empty" in str(exc):
@@ -67,53 +76,97 @@ class WhisperASR:
             _logging.getLogger("dubber.providers").warning(
                 "VAD error (%s); retrying without vad_filter", exc
             )
-            segments, info = self.model.transcribe(audio_input, language=language, vad_filter=False, beam_size=3)
+            segments, info = self.model.transcribe(audio_input, language=language, vad_filter=False, beam_size=beam_size)
             segs = list(segments)
         return Transcript(segs, info.language, float(info.language_probability))
 
 
 class NllbTranslator:
     _model: Any = None
+    _ct2_translator: Any = None
     _model_id: str | None = None
-    _tokenizers: dict[str, Any] = {}
+    _tokenizer: Any = None
     _lock = __import__("threading").Lock()
 
     def __init__(self) -> None:
-        import torch
-        from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
         model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
         with NllbTranslator._lock:
-            if NllbTranslator._model is None or NllbTranslator._model_id != model_id:
-                NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32).to("cpu")
-                NllbTranslator._model.eval()
-                NllbTranslator._model_id = model_id
-                NllbTranslator._tokenizers = {}
-            self.model = NllbTranslator._model
-            if not NllbTranslator._tokenizers:
-                # src_lang must be provided at tokenizer construction; setting the
-                # attribute afterwards does not append the NLLB language token.
-                for code in ("eng_Latn", "zho_Hans"):
-                    NllbTranslator._tokenizers[code] = AutoTokenizer.from_pretrained(model_id, src_lang=code)
+            # Check for CT2 int8 model
+            ct2_dir = Path(__file__).resolve().parents[1] / "tools" / "models" / "nllb-200-distilled-600M-ct2-int8"
+            if ct2_dir.is_dir() and (ct2_dir / "model.bin").exists() and os.getenv("USE_CT2", "1") != "0":
+                if NllbTranslator._ct2_translator is None:
+                    try:
+                        import ctranslate2
+                        NllbTranslator._ct2_translator = ctranslate2.Translator(
+                            str(ct2_dir), device="cpu", compute_type="int8", inter_threads=2, intra_threads=4
+                        )
+                    except Exception as ct2_err:
+                        log.warning("CTranslate2 init failed (%s); falling back to PyTorch", ct2_err)
+                        NllbTranslator._ct2_translator = None
 
-    def translate(self, text: str, source: str, target: str = "km") -> str:
-        import torch
-        from transformers import AutoTokenizer
+            if NllbTranslator._ct2_translator is None:
+                if NllbTranslator._model is None or NllbTranslator._model_id != model_id:
+                    import torch
+                    from transformers import AutoModelForSeq2SeqLM
+                    NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32).to("cpu")
+                    NllbTranslator._model.eval()
+                    NllbTranslator._model_id = model_id
+                self.model = NllbTranslator._model
+
+            if NllbTranslator._tokenizer is None:
+                from transformers import AutoTokenizer
+                NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+
+    def translate_batch(self, texts: list[str], source: str, target: str = "km", batch_size: int = 8) -> list[str]:
+        if not texts:
+            return []
         src_map = {"en": "eng_Latn", "zh": "zho_Hans", "km": "khm_Khmr"}
         tgt_map = {"en": "eng_Latn", "zh": "zho_Hans", "km": "khm_Khmr"}
         source_id = src_map.get(source, "eng_Latn")
         target_code = tgt_map.get(target, "khm_Khmr")
+
         with NllbTranslator._lock:
-            if source_id not in NllbTranslator._tokenizers:
+            if NllbTranslator._tokenizer is None:
+                from transformers import AutoTokenizer
                 model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
-                NllbTranslator._tokenizers[source_id] = AutoTokenizer.from_pretrained(model_id, src_lang=source_id)
-        tokenizer = NllbTranslator._tokenizers[source_id]
-        batch = tokenizer(text, return_tensors="pt", truncation=True, max_length=384)
+                NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+            tokenizer = NllbTranslator._tokenizer
+            tokenizer.src_lang = source_id
+
+        if NllbTranslator._ct2_translator is not None:
+            results_out = []
+            for i in range(0, len(texts), batch_size):
+                chunk = texts[i:i+batch_size]
+                tokenized = [tokenizer.convert_ids_to_tokens(tokenizer.encode(t)) for t in chunk]
+                res_batch = NllbTranslator._ct2_translator.translate_batch(
+                    tokenized,
+                    target_prefix=[[target_code]] * len(chunk),
+                    beam_size=1,
+                    max_decoding_length=160,
+                    no_repeat_ngram_size=3,
+                    max_batch_size=batch_size
+                )
+                for r in res_batch:
+                    clean = [t for t in r.hypotheses[0] if t not in {target_code, "</s>"}]
+                    results_out.append(tokenizer.decode(tokenizer.convert_tokens_to_ids(clean)).strip())
+            return results_out
+
+        import torch
         target_id = tokenizer.convert_tokens_to_ids(target_code)
-        with torch.inference_mode():
-            # num_beams>1 degenerates into repetition loops with transformers 4.57 on this
-            # M2M100/NLLB checkpoint; greedy decoding verified coherent Khmer output.
-            result = self.model.generate(**batch, forced_bos_token_id=target_id, max_new_tokens=160, num_beams=1, no_repeat_ngram_size=3)
-        return tokenizer.batch_decode(result, skip_special_tokens=True)[0].strip()
+        results_out = []
+        for i in range(0, len(texts), batch_size):
+            chunk = texts[i:i+batch_size]
+            batch = tokenizer(chunk, padding=True, truncation=True, max_length=256, return_tensors="pt")
+            with torch.inference_mode():
+                result = NllbTranslator._model.generate(
+                    **batch, forced_bos_token_id=target_id, max_new_tokens=160, num_beams=1, no_repeat_ngram_size=3
+                )
+            decoded = tokenizer.batch_decode(result, skip_special_tokens=True)
+            results_out.extend([d.strip() for d in decoded])
+        return results_out
+
+    def translate(self, text: str, source: str, target: str = "km") -> str:
+        return self.translate_batch([text], source, target)[0]
 
 
 class DemoTranslator:
@@ -271,19 +324,28 @@ class DemoToneTTS:
             out.setnchannels(1); out.setsampwidth(2); out.setframerate(rate); out.writeframes(pcm)
 
 
-def translate_khmer(text: str, source: str) -> tuple[str, str]:
+def translate_khmer_batch(texts: list[str], source: str) -> tuple[list[str], str]:
+    if not texts:
+        return [], "none"
     provider = os.getenv("TRANSLATION_PROVIDER", "nllb").strip().lower()
     if provider == "demo":
         if os.getenv("DEMO_MODE", "").strip().lower() not in {"1", "true", "yes"}:
             raise RuntimeError("Demo translation requires DEMO_MODE=1.")
-        return DemoTranslator().translate(text, source), "demo-fixture"
+        translator = DemoTranslator()
+        return [translator.translate(t, source) for t in texts], "demo-fixture"
     try:
-        translated = NllbTranslator().translate(text, source)
+        translated = NllbTranslator().translate_batch(texts, source)
     except Exception as exc:
         raise RuntimeError(f"NLLB translation failed; no fixture fallback is enabled: {exc}") from exc
-    if not translated.strip():
+    p_name = "nllb-ct2-int8" if NllbTranslator._ct2_translator is not None else "nllb-local"
+    return translated, p_name
+
+
+def translate_khmer(text: str, source: str) -> tuple[str, str]:
+    batch, p = translate_khmer_batch([text], source)
+    if not batch or not batch[0].strip():
         raise RuntimeError("NLLB translation returned empty text.")
-    return translated, "nllb-local"
+    return batch[0], p
 
 
 def tts_provider_health() -> dict[str, bool]:
