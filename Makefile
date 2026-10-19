@@ -1,4 +1,4 @@
-.PHONY: verify verify-live verify-full test frontend e2e probes gui
+.PHONY: verify verify-live verify-full test frontend e2e probes gui boundary-tests fault-tests
 
 # ── Deterministic verification (no network, no model inference) ──────────────
 # Runs: compile, pytest, mypy, frontend tests/lint/build, behavioural artifact checks, and Playwright E2E.
@@ -10,9 +10,11 @@ verify:
 verify-live:
 	python scripts/verify_all.py --live
 
-# ── Full verification (live + Playwright E2E, requires running server) ────────
+# ── Full verification (live + boundary + fault injection + Playwright E2E) ────
 verify-full:
 	python scripts/verify_all.py --live --full
+	$(MAKE) boundary-tests
+	$(MAKE) fault-tests
 
 # ── Unit tests only ───────────────────────────────────────────────────────────
 test:
@@ -34,3 +36,16 @@ probes:
 # ── Step 6: Full pipeline real-mode (en + zh), saves to demo/ ────────────────
 pipeline:
 	python scripts/step6_pipeline_real.py
+
+# ── Boundary tests (500 MB / 30 min limits) ──────────────────────────────────
+# Requires test media: run `python scripts/generate_boundary_test_media.py` first.
+# BLOCKED shows as BLOCKED, never PASS.
+boundary-tests:
+	python scripts/generate_boundary_test_media.py
+	python tests/test_real_500mb_boundary.py
+
+# ── Fault injection tests (real-mode 1-min pipeline + output assertions) ─────
+# Runs real ASR + translate + TTS on 1-min clip and validates output quality.
+# BLOCKED shows as BLOCKED, never PASS.
+fault-tests:
+	python tests/test_real_fault_injection_5min.py

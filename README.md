@@ -131,35 +131,45 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_on_my_machine.ps1
 ```
 
 ### Docker Status
-- **Docker Compose:** Configured with `docker-compose.yml` and `deploy/nginx.conf` (aligned for 4096 MB body size and 7200s proxy timeouts). Host Docker daemon was not tested during local dev.
+- **Docker Compose:** Configured with `docker-compose.yml` and `deploy/nginx.conf` (aligned for 500 MB body size and 1800s proxy timeouts). Host Docker daemon was not tested during local dev.
 
 ---
 
-## Long-Video Support (Up to 60 Minutes) & Honest Limits
+## Upload Limits & Processing Performance
 
-Soundme supports long-form media dubbing up to 90 minutes (`MAX_DURATION_MIN=90`, `MAX_UPLOAD_MB=4096`) utilizing resumable chunked uploads, bounded-memory streaming, and windowed pipeline processing.
+Soundme accepts uploads up to **500 MB** and videos up to **30 minutes** (`MAX_UPLOAD_MB=500`, `MAX_DURATION_MIN=30`, both env-configurable). Resumable chunked uploads ensure reliable delivery of large files.
 
-### Expected Processing Throughput (CPU vs GPU)
+### Measured Processing Throughput (CPU, 5-min benchmark)
 
-| Hardware Environment | Measured Throughput (60-min input) | Processing Ratio | Memory (RSS) | Intermediate Disk Space |
-|---|---|---|---|---|
-| **CPU (8-core Ryzen / i7)** | ~50 - 60 minutes wall-clock | ~0.85x – 1.0x real-time | < 500 MB (streamed) | ~3x input size (~20 GB) |
-| **GPU (NVIDIA RTX / CUDA)** | ~8 - 12 minutes wall-clock | ~5.0x – 7.0x real-time | < 2 GB VRAM | ~3x input size (~20 GB) |
+| Stage | Time (5 min input) | % of Total |
+|---|---|---|
+| Probe + Extract | 21.3s | 4% |
+| ASR (Whisper small, beam=1) | 221.1s | 41% |
+| Translate (NLLB CTranslate2 int8) | 59.7s | 11% |
+| TTS (Edge TTS) | 193.1s | 36% |
+| Fit/Mix + Mux | 42.4s | 8% |
+| **Total** | **537.5s** | **1.87× realtime** |
+
+**Per minute of video:** ~1.8 min processing time on CPU.
+
+### Resource Usage
+
+| Metric | Measured Value |
+|---|---|
+| **Peak RAM (RSS)** | ~1.6 GB (pipeline streams, not bulk-loads) |
+| **RSS during 500 MB upload** | Flat (+5 MB delta, streaming 5 MB chunks) |
+| **Disk space** | ~3× input size for intermediates |
 
 ### Hardware Recommendations
-- **Minimum:** 8-core CPU, 16 GB RAM, 20 GB free SSD disk space (for windowed audio chunks and temp files).
-- **Recommended:** NVIDIA GPU with >= 8 GB VRAM (CUDA 12 support for faster-whisper fp16 + Demucs BGM separation), 32 GB RAM, fast NVMe SSD.
+- **Minimum:** 4-core CPU, 4 GB RAM, 5 GB free SSD disk space.
+- **Recommended:** 8-core CPU, 8 GB RAM, fast SSD. NVIDIA GPU with ≥ 8 GB VRAM (CUDA) for ~5× faster ASR.
 
 ### Edge TTS Rate Limits & Production Azure Speech Recommendation
-- **Edge TTS (Default):** Uses Microsoft Edge's read-aloud service without SLA. For large batches or 60-minute continuous production dubbing, Microsoft may enforce rate limits (HTTP 429 / connection drop). The pipeline includes exponential backoff with jitter and per-segment artifact caching.
-- **Production Recommendation:** Configure `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` in `.env` to use the official Azure Cognitive Services Speech SDK. This provides enterprise SLA, parallel concurrency, and zero risk of ToS throttling.
+- **Edge TTS (Default):** Uses Microsoft Edge's read-aloud service without SLA. For long videos or high-throughput production dubbing, Microsoft may enforce rate limits (HTTP 429 / connection drop). The pipeline includes exponential backoff with jitter and per-segment artifact caching.
+- **Production Recommendation:** Configure `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` in `.env` to use the official Azure Cognitive Services Speech SDK.
 
-### Model Licenses & Commercial Compliance
-- **Meta NLLB-200 (`facebook/nllb-200-distilled-600M`):** Released under **CC-BY-NC 4.0 (Non-Commercial)**. For commercial deployments, configure commercial translation providers (e.g. Google Cloud Translation API or DeepL).
-- **Meta MMS (`facebook/mms-tts-khm`):** Released under **CC-BY-NC 4.0 (Non-Commercial)**. Edge TTS / Azure Speech should be used for commercial production dubbing.
-
-### Overnight 60-Minute Verification Scripts
-To verify full 60-minute dubbing and fault injection on your host machine:
+### Overnight 30-Minute Verification Scripts
+To verify full 30-minute dubbing on your host machine:
 - **Windows (PowerShell):**
   ```powershell
   powershell -ExecutionPolicy Bypass -File scripts\verify_long_on_my_machine.ps1
