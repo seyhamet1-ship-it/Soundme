@@ -1,26 +1,112 @@
+# ─────────────────────────────────────────────────────────────────
+# Soundme — docker-compose.yml
+# Phase 9 deploy-test package: backend + Caddy HTTPS reverse proxy
+# Non-root user, persistent volumes, healthchecks, resource limits.
+#
+# Usage:
+#   cp .env.example .env && nano .env    # set ACCESS_TOKENS and DOMAIN
+#   docker compose up --build -d
+#   docker compose logs -f soundme
+#
+# > [!WARNING]
+# > If DATA_DIR is on a network/cloud drive the backend will print a
+# > startup warning. Use a local SSD path in production.
+# ─────────────────────────────────────────────────────────────────
+
 services:
-  soundme-app:
-    build: .
-    container_name: soundme-app
+  soundme:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: soundme:latest
+    container_name: soundme
     restart: unless-stopped
+    user: "1000:1000"
+
     environment:
-      - MAX_DURATION_MIN=30
-      - MAX_UPLOAD_MB=500
-      - ASR_MODEL=small
-      - MAX_WORKERS=2
+      # ── limits ──────────────────────────────────────────────────
+      MAX_UPLOAD_MB: "${MAX_UPLOAD_MB:-500}"
+      MAX_DURATION_MIN: "${MAX_DURATION_MIN:-30}"
+      MAX_CONCURRENT_JOBS: "${MAX_CONCURRENT_JOBS:-1}"
+
+      # ── auth & abuse limits ──────────────────────────────────────
+      ACCESS_TOKENS: "${ACCESS_TOKENS:?Set ACCESS_TOKENS in .env}"
+      RATE_LIMIT_RPM: "${RATE_LIMIT_RPM:-120}"
+      MAX_QUEUE_CAP: "${MAX_QUEUE_CAP:-5}"
+      DAILY_QUOTA_MINUTES: "${DAILY_QUOTA_MINUTES:-60}"
+      CLEANUP_TTL_HOURS: "${CLEANUP_TTL_HOURS:-24}"
+
+      # ── CORS ─────────────────────────────────────────────────────
+      CORS_ORIGINS: "${CORS_ORIGINS:-https://${DOMAIN:-localhost}}"
+
+      # ── TTS ──────────────────────────────────────────────────────
+      AZURE_SPEECH_KEY: "${AZURE_SPEECH_KEY:-}"
+      AZURE_SPEECH_REGION: "${AZURE_SPEECH_REGION:-}"
+      AZURE_MONTHLY_CHAR_CAP: "${AZURE_MONTHLY_CHAR_CAP:-450000}"
+      TTS_PROVIDER_ORDER: "${TTS_PROVIDER_ORDER:-azure,mms}"
+
+      # ── ASR / translation ────────────────────────────────────────
+      ASR_MODEL: "${ASR_MODEL:-small}"
+      ASR_DEVICE: "cpu"
+      TRANSLATION_PROVIDER: "nllb"
+
+      # ── model warm-up ────────────────────────────────────────────
+      WARM_MODELS_AT_STARTUP: "1"
+
+      # ── misc ─────────────────────────────────────────────────────
+      PYTHONUNBUFFERED: "1"
+      UPLOAD_DIR: "/data/uploads"
+      JOB_DB: "/data/jobs.sqlite3"
+
     volumes:
-      - ./uploads:/app/uploads
-      - ./jobs.sqlite3:/app/jobs.sqlite3
+      # Persistent data (uploads, outputs, job DB)
+      - soundme_data:/data
+      # Persistent model cache (avoids re-downloading on container rebuild)
+      - soundme_models:/root/.cache/huggingface
+      # CTranslate2 converted model (baked into image at build time)
+      - ./tools/models:/app/tools/models:ro
+
     expose:
       - "8000"
 
-  reverse-proxy:
-    image: nginx:alpine
-    container_name: soundme-proxy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; r=urllib.request.urlopen('http://localhost:8000/api/health',timeout=5); assert __import__('json').loads(r.read())[\"status\"] in {'ok','warming'}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s    # models load ~60-165 s cold start
+
+    # Resource limits (from measured peak RSS ~1.8 GB + 1.2 GB headroom)
+    mem_limit: "3g"
+    memswap_limit: "3g"
+    cpus: "2.0"
+
+    depends_on:
+      - caddy
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: soundme_caddy
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3
     volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - soundme-app
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+    environment:
+      DOMAIN: "${DOMAIN:-localhost}"
+
+volumes:
+  soundme_data:
+    driver: local
+  soundme_models:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local

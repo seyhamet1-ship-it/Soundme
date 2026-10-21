@@ -98,6 +98,8 @@ def compute_content_hash(text: str, voice: str, slot: float) -> str:
 
 
 def get_cached_segment_audio(content_hash: str) -> Path | None:
+    if os.getenv("DISABLE_TTS_CACHE", "").strip().lower() in {"1", "true", "yes"}:
+        return None
     target = CACHE_TTS / f"{content_hash}.wav"
     if target.is_file() and target.stat().st_size > 1000:
         return target

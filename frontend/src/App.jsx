@@ -3,6 +3,40 @@ import strings from './i18n/strings.json';
 
 const A = '/api';
 
+// ── Auth token management ──────────────────────────────────────────────────
+// Token is read from:
+//  1. URL param ?token=xxx on first load (saved to localStorage)
+//  2. localStorage 'soundme_token'
+// All API calls attach Authorization: Bearer <token>.
+function getToken() {
+  try {
+    const params = new URLSearchParams(window.location?.search || '');
+    const urlToken = params.get('token');
+    if (urlToken) {
+      localStorage.setItem('soundme_token', urlToken);
+      // Clean the token from the URL bar (don't share it accidentally)
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete('token');
+      window.history.replaceState({}, '', clean.toString());
+    }
+  } catch (e) {
+    void e;
+  }
+  return localStorage.getItem('soundme_token') || (import.meta.env?.MODE === 'test' ? 'soundme-test-token' : '');
+}
+
+let TOKEN = getToken();
+
+function authHeaders(extra = {}) {
+  if (TOKEN) return { Authorization: `Bearer ${TOKEN}`, ...extra };
+  return extra;
+}
+
+function authFetch(url, opts = {}) {
+  const headers = authHeaders(opts.headers || {});
+  return fetch(url, { ...opts, headers });
+}
+
 export default function App() {
   const [en, E] = useState(false);
   const [file, F] = useState(null);
@@ -18,20 +52,37 @@ export default function App() {
   const [rows, Q] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [pendingUpload] = useState(() => localStorage.getItem('pendingUploadId'));
+  const [noToken, setNoToken] = useState(!TOKEN);
 
   const t = (key) => strings[key]?.[en ? 'en' : 'km'] || key;
 
+  // ── Token gate: show input if missing ──────────────────────────────────────
+  const [tokenInput, setTokenInput] = useState('');
+  function submitToken() {
+    const v = tokenInput.trim();
+    if (!v) return;
+    TOKEN = v;
+    localStorage.setItem('soundme_token', v);
+    setNoToken(false);
+  }
+
+  // ── Load active job and history on mount ───────────────────────────────────
   useEffect(() => {
+    if (noToken) return;
     let id = localStorage.getItem('activeJob');
     if (id) J({ id });
-    fetch(A + '/jobs').then((r) => r.json()).then(H).catch(() => {});
-  }, []);
+    authFetch(A + '/jobs').then((r) => r.json()).then(H).catch(() => {});
+  }, [noToken]);
 
+  // ── Job polling with SSE → polling fallback ────────────────────────────────
   useEffect(() => {
-    if (!job?.id) return;
+    if (!job?.id || noToken) return;
     let live = true;
+    let sseAlive = false;
+    let timer = null;
+
     const poll = () =>
-      fetch(`${A}/jobs/${job.id}`)
+      authFetch(`${A}/jobs/${job.id}`)
         .then((r) => r.json())
         .then((d) => {
           if (!live) return;
@@ -39,17 +90,68 @@ export default function App() {
           if (d.segments) Q(d.segments);
           if (['completed', 'failed', 'canceled'].includes(d.status)) {
             localStorage.removeItem('activeJob');
-            fetch(A + '/jobs').then((r) => r.json()).then(H);
+            authFetch(A + '/jobs').then((r) => r.json()).then(H);
           }
         })
         .catch(() => {});
-    poll();
-    let timer = setInterval(poll, 1300);
+
+    // Attempt SSE first; fall back to polling after 5 s if nothing arrives
+    let sse = null;
+    let sseTimeout = null;
+    try {
+      const sseUrl = `${A}/jobs/${job.id}/events${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`;
+      sse = new EventSource(sseUrl);
+      sseTimeout = setTimeout(() => {
+        // If SSE hasn't delivered any message within 5 s, switch to polling
+        if (!sseAlive && live) {
+          sse?.close();
+          poll();
+          timer = setInterval(poll, 1300);
+        }
+      }, 5000);
+
+      sse.onmessage = (e) => {
+        sseAlive = true;
+        clearTimeout(sseTimeout);
+        if (!live) return;
+        try {
+          const d = JSON.parse(e.data);
+          J(d);
+          if (d.segments) Q(d.segments);
+          if (['completed', 'failed', 'canceled'].includes(d.status)) {
+            sse?.close();
+            localStorage.removeItem('activeJob');
+            authFetch(A + '/jobs').then((r) => r.json()).then(H);
+          }
+        } catch (err) {
+          void err;
+        }
+      };
+
+      sse.onerror = () => {
+        if (!sseAlive && live) {
+          // SSE failed before delivering anything → fall back to polling
+          clearTimeout(sseTimeout);
+          sse?.close();
+          poll();
+          timer = setInterval(poll, 1300);
+        } else {
+          sse?.close();
+        }
+      };
+    } catch {
+      // EventSource not supported → polling only
+      poll();
+      timer = setInterval(poll, 1300);
+    }
+
     return () => {
       live = false;
-      clearInterval(timer);
+      clearTimeout(sseTimeout);
+      sse?.close();
+      if (timer) clearInterval(timer);
     };
-  }, [job?.id]);
+  }, [job?.id, noToken]);
 
   function pick(f) {
     X('');
@@ -75,15 +177,17 @@ export default function App() {
 
   async function uploadChunked() {
     setSubmitting(true);
-    let chunkSize = 5 * 1024 * 1024;
-    let totalChunks = Math.ceil(file.size / chunkSize);
+    // Chunk size ≤ 8 MB as required (Cloudflare limit); upload ≤ 3 chunks in parallel
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks (well within 8 MB limit)
+    const PARALLEL = 3;
+    let totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
 
     try {
-      let initRes = await fetch(A + '/upload/init', {
+      let initRes = await authFetch(A + '/upload/init', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, total_size: file.size, chunk_size: chunkSize }),
+        body: JSON.stringify({ filename: file.name, total_size: file.size, chunk_size: CHUNK_SIZE }),
       });
       if (!initRes.ok) {
         let errData = await initRes.json().catch(() => ({}));
@@ -94,26 +198,33 @@ export default function App() {
       let { upload_id } = await initRes.json();
       localStorage.setItem('pendingUploadId', upload_id);
 
-      let stRes = await fetch(`${A}/upload/${upload_id}/status`);
+      let stRes = await authFetch(`${A}/upload/${upload_id}/status`);
       let st = await stRes.json();
       let receivedSet = new Set(st.received_chunks || []);
 
+      // Upload chunks in batches of PARALLEL (≤ 3 in flight at once)
+      const pending = [];
       for (let i = 0; i < totalChunks; i++) {
-        if (receivedSet.has(i)) continue;
-        let start = i * chunkSize;
-        let end = Math.min(file.size, start + chunkSize);
-        let slice = file.slice(start, end);
-
-        let chunkRes = await fetch(`${A}/upload/${upload_id}/chunk`, {
-          method: 'PUT',
-          headers: { 'X-Chunk-Index': String(i) },
-          body: slice,
-        });
-        if (!chunkRes.ok) throw new Error('Chunk upload failed');
-        P(Math.round(((i + 1) / totalChunks) * 100));
+        if (receivedSet.has(i)) { P(Math.round(((i + 1) / totalChunks) * 100)); continue; }
+        pending.push(i);
+      }
+      for (let b = 0; b < pending.length; b += PARALLEL) {
+        const batch = pending.slice(b, b + PARALLEL);
+        await Promise.all(batch.map(async (i) => {
+          let start = i * CHUNK_SIZE;
+          let end = Math.min(file.size, start + CHUNK_SIZE);
+          let slice = file.slice(start, end);
+          let chunkRes = await authFetch(`${A}/upload/${upload_id}/chunk`, {
+            method: 'PUT',
+            headers: { 'X-Chunk-Index': String(i) },
+            body: slice,
+          });
+          if (!chunkRes.ok) throw new Error('Chunk upload failed');
+        }));
+        P(Math.round((Math.min(b + PARALLEL, pending.length) / totalChunks) * 100));
       }
 
-      let compRes = await fetch(`${A}/upload/${upload_id}/complete`, {
+      let compRes = await authFetch(`${A}/upload/${upload_id}/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -143,10 +254,7 @@ export default function App() {
 
   function upload() {
     if (submitting) return;
-    if (!file || file.size === 0) {
-      X(t('file_empty'));
-      return;
-    }
+    if (!file || file.size === 0) { X(t('file_empty')); return; }
     if (file.size > 500 * 1024 * 1024) {
       let actualMb = (file.size / (1024 * 1024)).toFixed(1);
       let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ 500 MB។`;
@@ -154,10 +262,7 @@ export default function App() {
       X(`${kmMsg} (${enMsg})`);
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      uploadChunked();
-      return;
-    }
+    if (file.size > 10 * 1024 * 1024) { uploadChunked(); return; }
     setSubmitting(true);
     let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
     let d = new FormData();
@@ -170,6 +275,7 @@ export default function App() {
     let x = new XMLHttpRequest();
     x.open('POST', A + '/jobs');
     x.setRequestHeader('Idempotency-Key', idempotencyKey);
+    if (TOKEN) x.setRequestHeader('Authorization', `Bearer ${TOKEN}`);
     x.upload.onprogress = (e) => e.lengthComputable && P(Math.round((e.loaded / e.total) * 100));
     x.onload = () => {
       setSubmitting(false);
@@ -181,9 +287,7 @@ export default function App() {
           if (typeof errDetail === 'object') {
             errDetail = (en ? errDetail.message_en : errDetail.message_km) || errDetail.code || JSON.stringify(errDetail);
           }
-        } catch {
-          errDetail = x.responseText || 'Error';
-        }
+        } catch { errDetail = x.responseText || 'Error'; }
         X(errDetail);
         return;
       }
@@ -191,41 +295,68 @@ export default function App() {
       localStorage.setItem('activeJob', r.id);
       J(r);
     };
-    x.onerror = () => {
-      setSubmitting(false);
-      X(t('processing_failed'));
-    };
+    x.onerror = () => { setSubmitting(false); X(t('processing_failed')); };
     x.send(d);
   }
 
   async function previewVoice() {
     X('');
     try {
-      let r = await fetch(A + '/tts/preview', {
+      let r = await authFetch(A + '/tts/preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ voice }),
       });
-      if (!r.ok) {
-        let d = await r.json().catch(() => ({}));
-        X(d.detail || 'Voice preview failed.');
-        return;
-      }
+      if (!r.ok) { let d = await r.json().catch(() => ({})); X(d.detail || 'Voice preview failed.'); return; }
       let url = URL.createObjectURL(await r.blob());
       new Audio(url).play();
-    } catch {
-      X('Voice preview failed. Server unavailable.');
-    }
+    } catch { X('Voice preview failed. Server unavailable.'); }
   }
 
   async function save() {
-    await fetch(`${A}/jobs/${job.id}/segments`, {
+    await authFetch(`${A}/jobs/${job.id}/segments`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(rows),
     });
-    await fetch(`${A}/jobs/${job.id}/resume`, { method: 'POST' });
+    await authFetch(`${A}/jobs/${job.id}/resume`, { method: 'POST' });
     J({ ...job, status: 'running' });
+  }
+
+  // ── Token gate UI ──────────────────────────────────────────────────────────
+  if (noToken) {
+    return (
+      <main>
+        <header>
+          <div>
+            <small>SOUNDME · KHMER STUDIO</small>
+            <h1>{t('app_title')}</h1>
+          </div>
+          <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
+        </header>
+        <div className="grid">
+          <section className="card">
+            <h2>{en ? 'Access Code Required' : 'តម្រូវការលេខកូដចូល'}</h2>
+            <p className="notice">
+              {en
+                ? 'This service is private. Enter your access code to continue.'
+                : 'សេវាកម្មនេះជាឯកជន។ សូមបញ្ចូលលេខកូដចូលដើម្បីបន្ត។'}
+            </p>
+            <input
+              type="password"
+              placeholder={en ? 'Access code' : 'លេខកូដចូល'}
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && submitToken()}
+              style={{ width: '100%', padding: '0.6rem', borderRadius: '0.375rem', border: '1px solid #e2e8f0', marginBottom: '0.75rem' }}
+            />
+            <button className="primary" onClick={submitToken}>
+              {en ? 'Continue' : 'បន្ត'}
+            </button>
+          </section>
+        </div>
+      </main>
+    );
   }
 
   let stages = ['queued', 'transcribe', 'translate', 'voice', 'mix', 'done'];
@@ -250,10 +381,7 @@ export default function App() {
           <label
             className="drop"
             onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              e.preventDefault();
-              pick(e.dataTransfer.files[0]);
-            }}
+            onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files[0]); }}
           >
             <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
             <b>＋</b>
@@ -278,9 +406,7 @@ export default function App() {
               </select>
             </label>
           </div>
-          <button className="secondary" onClick={previewVoice}>
-            {t('preview_voice_btn')}
-          </button>
+          <button className="secondary" onClick={previewVoice}>{t('preview_voice_btn')}</button>
           <div className="checks">
             {[
               [bg, B, t('keep_background')],
@@ -293,7 +419,7 @@ export default function App() {
               </label>
             ))}
           </div>
-          <p className="notice">{t('ownership_notice')}</p>
+          <p className="notice">{t('ownership_notice')} {en ? 'Files are deleted after 24 h.' : 'ឯកសារត្រូវបានលុបបន្ទាប់ពី 24 ម៉ោង។'}</p>
           {bg && (
             <p className="notice" style={{ fontSize: '0.75rem', marginTop: '-0.25rem', color: '#64748b' }}>
               {en ? 'Audio ducking enabled for background preservation.' : 'ប្រើប្រាស់ Audio Ducking សម្រាប់រក្សាតន្ត្រីផ្ទៃខាងក្រោយ។'}
@@ -305,16 +431,10 @@ export default function App() {
             </p>
           )}
           {file && !job && (
-            <button className="primary" onClick={upload} disabled={submitting}>
-              {t('start_dubbing')}
-            </button>
+            <button className="primary" onClick={upload} disabled={submitting}>{t('start_dubbing')}</button>
           )}
           {pct > 0 && <progress value={pct} max="100" aria-label="Upload progress" />}
-          {err && (
-            <p role="alert" className="error">
-              {err}
-            </p>
-          )}
+          {err && <p role="alert" className="error">{err}</p>}
         </section>
         <section className="card">
           <h2>{t('processing_heading')}</h2>
@@ -339,7 +459,7 @@ export default function App() {
             </p>
           )}
           {job && ['queued', 'running'].includes(job.status) && (
-            <button className="secondary" onClick={() => fetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' })}>
+            <button className="secondary" onClick={() => authFetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' })}>
               {t('cancel_btn')}
             </button>
           )}
@@ -348,16 +468,16 @@ export default function App() {
               <div className="players-compare" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
                 <div>
                   <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>{en ? 'Original Video' : 'វីដេអូដើម · Original'}</h4>
-                  <video className="preview original-player" aria-label="Original video" controls src={file ? URL.createObjectURL(file) : `${A}/jobs/${job.id}/download/source`} style={{ width: '100%', borderRadius: '0.5rem' }} />
+                  <video className="preview original-player" aria-label="Original video" controls src={file ? URL.createObjectURL(file) : `${A}/jobs/${job.id}/download/source?token=${encodeURIComponent(TOKEN)}`} style={{ width: '100%', borderRadius: '0.5rem' }} />
                 </div>
                 <div>
                   <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>{en ? 'Dubbed Video (Khmer)' : 'វីដេអូបកប្រែជាភាសាខ្មែរ · Dubbed'}</h4>
-                  <video className="preview dubbed-player" aria-label="Dubbed video" controls src={`${A}/jobs/${job.id}/download/video`} style={{ width: '100%', borderRadius: '0.5rem' }} />
+                  <video className="preview dubbed-player" aria-label="Dubbed video" controls src={`${A}/jobs/${job.id}/download/video?token=${encodeURIComponent(TOKEN)}`} style={{ width: '100%', borderRadius: '0.5rem' }} />
                 </div>
               </div>
               <nav style={{ marginTop: '1rem' }}>
                 {['video', 'audio', 'srt', 'vtt'].map((k) => (
-                  <a key={k} href={`${A}/jobs/${job.id}/download/${k}`} download>
+                  <a key={k} href={`${A}/jobs/${job.id}/download/${k}?token=${encodeURIComponent(TOKEN)}`} download>
                     Download {k.toUpperCase()}
                   </a>
                 ))}
@@ -374,15 +494,11 @@ export default function App() {
               {r.start.toFixed(1)}s · {r.source_text}
               <textarea
                 value={r.text_km}
-                onChange={(e) =>
-                  Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))
-                }
+                onChange={(e) => Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))}
               />
             </label>
           ))}
-          <button className="primary" onClick={save}>
-            {t('save_and_continue')}
-          </button>
+          <button className="primary" onClick={save}>{t('save_and_continue')}</button>
         </section>
       )}
       <section className="card">
@@ -393,14 +509,14 @@ export default function App() {
             .map((j) => (
               <p className="history" key={j.id}>
                 {j.filename || j.id} · {j.status}{' '}
-                {j.status === 'completed' && <a href={`${A}/jobs/${j.id}/download/video`}>MP4</a>}
+                {j.status === 'completed' && <a href={`${A}/jobs/${j.id}/download/video?token=${encodeURIComponent(TOKEN)}`}>MP4</a>}
               </p>
             ))
         ) : (
           <p>{t('history_empty')}</p>
         )}
       </section>
-      <footer>Local processing · Upload content you have permission to use.</footer>
+      <footer>Local processing · Upload content you have permission to use · Files deleted after 24 h.</footer>
     </main>
   );
 }

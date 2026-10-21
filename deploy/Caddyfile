@@ -1,0 +1,27 @@
+{DOMAIN} {
+    # Automatic HTTPS via Let's Encrypt (set DOMAIN in .env)
+    encode gzip
+
+    # Security headers
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        X-XSS-Protection "1; mode=block"
+        # Remove server identification
+        -Server
+    }
+
+    # Reverse proxy to Soundme backend
+    reverse_proxy soundme:8000 {
+        # Generous timeouts for long-running jobs (30-min video)
+        transport http {
+            dial_timeout 10s
+            response_header_timeout 7200s
+            read_timeout 7200s
+        }
+        # Forward real IP
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+    }
+}

@@ -73,7 +73,7 @@ class ProviderReliabilityTests(unittest.TestCase):
                 raise RuntimeError("edge down")
 
         class OkAzure:
-            def synthesize(self, text, voice, destination):
+            def synthesize(self, text, voice, destination, **kwargs):
                 calls.append("azure")
                 destination.write_bytes(b"RIFF0000WAVE")
 
@@ -84,6 +84,7 @@ class ProviderReliabilityTests(unittest.TestCase):
                 {
                     "DEMO_MODE": "",
                     "TTS_PROVIDER": "auto",
+                    "TTS_PROVIDER_ORDER": "edge,azure",
                     "AZURE_SPEECH_KEY": "test-key",
                     "AZURE_SPEECH_REGION": "eastus",
                 },

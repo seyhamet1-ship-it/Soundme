@@ -11,6 +11,9 @@ import pytest
 from app.storage import set_job, get_job, recover_jobs, list_jobs
 from app.i18n import STRINGS, get_km
 
+TEST_TOKEN = "soundme-test-token"
+AUTH_HEADER = {"Authorization": f"Bearer {TEST_TOKEN}"}
+
 
 def test_recover_jobs_marks_running_jobs_as_failed():
     jid = "test-midjob-restart-123"
@@ -18,20 +21,21 @@ def test_recover_jobs_marks_running_jobs_as_failed():
         jid,
         {
             "id": jid,
+            "owner_token": TEST_TOKEN,
             "status": "running",
             "stage": "transcribe",
             "progress": 25,
             "filename": "sample_input.mp4",
         },
     )
-    job_before = get_job(jid)
+    job_before = get_job(jid, owner_token=TEST_TOKEN)
     assert job_before is not None
     assert job_before["status"] == "running"
 
     # Simulate server restart lifecycle triggering recover_jobs()
     recover_jobs()
 
-    job_after = get_job(jid)
+    job_after = get_job(jid, owner_token=TEST_TOKEN)
     assert job_after is not None
     assert job_after["status"] == "failed"
     assert job_after["stage"] == "failed"
@@ -49,6 +53,8 @@ def test_real_server_kill_and_restart():
         port = s.getsockname()[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(ROOT)
+    env["ACCESS_TOKENS"] = TEST_TOKEN
+    env["WARM_MODELS_AT_STARTUP"] = "0"
 
     # 1. Start isolated uvicorn
     p1 = subprocess.Popen(
@@ -69,7 +75,7 @@ def test_real_server_kill_and_restart():
                         break
             except Exception:
                 time.sleep(0.5)
-        assert up, "Server failed to start on port 8009"
+        assert up, f"Server failed to start on port {port}"
 
         # 2. Insert a simulated running job into storage
         sim_jid = "test-live-kill-job"
@@ -77,6 +83,7 @@ def test_real_server_kill_and_restart():
             sim_jid,
             {
                 "id": sim_jid,
+                "owner_token": TEST_TOKEN,
                 "status": "running",
                 "stage": "voice",
                 "progress": 60,
@@ -85,7 +92,8 @@ def test_real_server_kill_and_restart():
         )
 
         # Verify it is reported as running by the live server
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/jobs/{sim_jid}") as res:
+        req1 = urllib.request.Request(f"http://127.0.0.1:{port}/api/jobs/{sim_jid}", headers=AUTH_HEADER)
+        with urllib.request.urlopen(req1) as res:
             live_job = json.loads(res.read().decode("utf-8"))
             assert live_job["status"] == "running"
 
@@ -93,7 +101,7 @@ def test_real_server_kill_and_restart():
         p1.kill()
         p1.wait()
 
-        # 4. Restart server on port 8009
+        # 4. Restart server on same port
         p2 = subprocess.Popen(
             [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(port)],
             cwd=ROOT,
@@ -111,10 +119,11 @@ def test_real_server_kill_and_restart():
                             break
                 except Exception:
                     time.sleep(0.5)
-            assert up2, "Restarted server failed to start on port 8009"
+            assert up2, f"Restarted server failed to start on port {port}"
 
             # 5. Fetch job from restarted server
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/jobs/{sim_jid}") as res:
+            req2 = urllib.request.Request(f"http://127.0.0.1:{port}/api/jobs/{sim_jid}", headers=AUTH_HEADER)
+            with urllib.request.urlopen(req2) as res:
                 recovered_job = json.loads(res.read().decode("utf-8"))
                 assert recovered_job["status"] == "failed"
                 assert recovered_job["error"]["code"] == "SERVER_RESTARTED"

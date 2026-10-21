@@ -139,18 +139,23 @@ powershell -ExecutionPolicy Bypass -File scripts\verify_on_my_machine.ps1
 
 Soundme accepts uploads up to **500 MB** and videos up to **30 minutes** (`MAX_UPLOAD_MB=500`, `MAX_DURATION_MIN=30`, both env-configurable). Resumable chunked uploads ensure reliable delivery of large files.
 
-### Measured Processing Throughput (CPU, 5-min benchmark, Phase 8 A/B Ground Truth)
+### Measured Processing Throughput (CPU, 5-min benchmark, Phase 9 Fresh Ground Truth)
 
-| Stage | Time (5 min input) | % of Total |
+| Stage | Time (5 min input, 286.8s) | % of Total |
 |---|---|---|
-| Probe + Extract | 0.67s | 0.8% |
-| ASR (Whisper small batched, beam=1) | 54.48s | 63.6% |
-| Translate (NLLB CTranslate2 int8) | 14.61s | 17.1% |
-| TTS (Edge TTS concurrent=2 / cached) | 2.51s | 2.9% |
-| Fit/Mix + Mux (Stream Copy) | 13.05s | 15.2% |
-| **Total (Warm Median)** | **85.65s** | **0.30× realtime** |
+| Probe + Extract | 0.60s | 0.5% |
+| ASR (Whisper small batched, beam=1) | 39.33s | 29.7% |
+| Translate (NLLB CTranslate2 int8) | 17.10s | 12.9% |
+| TTS (Edge TTS concurrent=2, fresh 100%) | 51.44s | 38.8% |
+| Fit/Mix + Mux | 23.57s | 17.8% |
+| **Total (Warm Fresh)** | **132.52s** | **0.46× realtime** |
 
-**Realtime performance:** ~0.30 min processing per 1 min of video on CPU (reaching the ≤ 0.6× realtime goal). Detailed stage anomaly breakdown and speed lever evaluations are documented in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+**Realtime performance:** ~0.46 min processing per 1 min of video on CPU with all segment caches DISABLED (`tts_cached = 0`, `tts_computed = 60`, strictly reaching the ≤ 0.6× realtime goal). Detailed stage anomaly breakdown and speed lever evaluations are documented in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+### 485 MB GUI Verification Job (Disclosed)
+- **Source Video Duration:** 72.47 s
+- **Processing Time:** 385.6 s
+- **Real-Time Ratio:** 5.32× realtime (cold start with model download + Google Drive File Stream VFS contention; on local SSD with warmed models, 72s processes in ~34s / 0.47× realtime).
 
 ### Resource Usage
 

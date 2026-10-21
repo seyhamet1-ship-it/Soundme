@@ -324,11 +324,59 @@ class MMSTTSProvider:
             output.writeframes(pcm.tobytes())
 
 
-class AzureTTSProvider:
-    """Azure Speech fallback, enabled only when both Azure settings are configured."""
+MODELS_READY = False
 
-    def synthesize(self, text: str, voice: str, destination: Path) -> None:
+def is_models_ready() -> bool:
+    global MODELS_READY
+    return MODELS_READY
+
+def warm_models() -> bool:
+    global MODELS_READY
+    log.info("Warming pipeline models (Whisper ASR + NLLB CTranslate2)...")
+    try:
+        asr = WhisperASR(os.getenv("ASR_MODEL", "small"))
+        _ = asr.model
+        trans = NllbTranslator()
+        _ = trans.translate_batch(["SoundMe"], "en", "km")
+        MODELS_READY = True
+        log.info("All pipeline models are warmed and ready.")
+        return True
+    except Exception as exc:
+        log.warning("Model warming non-fatal error: %s", exc)
+        MODELS_READY = False
+        return False
+
+def get_tts_provider_order() -> list[str]:
+    custom = os.getenv("TTS_PROVIDER_ORDER")
+    if custom:
+        return [p.strip().lower() for p in custom.split(",") if p.strip()]
+    selected = os.getenv("TTS_PROVIDER", "auto").strip().lower()
+    if selected not in {"", "auto"}:
+        return [selected]
+    azure_ready = bool(os.getenv("AZURE_SPEECH_KEY") and os.getenv("AZURE_SPEECH_REGION"))
+    edge_allowed = os.getenv("ENABLE_EDGE_TTS", "1").strip().lower() not in {"0", "false", "no"}
+    mms_allowed = os.getenv("ENABLE_MMS_TTS", "1").strip().lower() not in {"0", "false", "no"}
+    order = []
+    if azure_ready:
+        order.append("azure")
+    if edge_allowed:
+        order.append("edge")
+    if mms_allowed:
+        order.append("mms")
+    return order or ["edge", "mms"]
+
+class AzureTTSProvider:
+    """Azure Speech primary/fallback, enabled when AZURE_SPEECH_KEY and AZURE_SPEECH_REGION are configured."""
+
+    def synthesize(self, text: str, voice: str, destination: Path, rate: str = "+0%") -> None:
         import azure.cognitiveservices.speech as speechsdk
+        from app.storage import get_monthly_azure_chars, record_azure_chars
+
+        cap = int(os.getenv("AZURE_MONTHLY_CHAR_CAP", "450000"))
+        used = get_monthly_azure_chars()
+        if used + len(text) > cap:
+            log.warning("Azure Speech monthly cap reached (%d / %d chars used); stopping Azure calls", used, cap)
+            raise RuntimeError(f"AZURE_CAP_REACHED: Monthly character limit ({cap}) reached. Used: {used} chars.")
 
         config = speechsdk.SpeechConfig(
             subscription=os.environ["AZURE_SPEECH_KEY"],
@@ -338,13 +386,23 @@ class AzureTTSProvider:
         config.set_speech_synthesis_output_format(
             speechsdk.SpeechSynthesisOutputFormat.Riff24Khz16BitMonoPcm
         )
-        result = speechsdk.SpeechSynthesizer(
-            speech_config=config, audio_config=None
-        ).speak_text_async(text).get()
+        synth = speechsdk.SpeechSynthesizer(speech_config=config, audio_config=None)
+
+        if rate and rate.strip() not in {"+0%", "0%", "+0"}:
+            r_str = rate.strip()
+            ssml = (
+                f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="km-KH">'
+                f'<voice name="{voice}"><prosody rate="{r_str}">{text}</prosody></voice></speak>'
+            )
+            result = synth.speak_ssml_async(ssml).get()
+        else:
+            result = synth.speak_text_async(text).get()
+
         if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted or not result.audio_data:
             raise RuntimeError(f"Azure Speech synthesis failed: {result.reason}")
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(result.audio_data)
+        record_azure_chars(len(text))
 
 
 class DemoToneTTS:
@@ -385,21 +443,41 @@ def translate_khmer(text: str, source: str) -> tuple[str, str]:
     return batch[0], p
 
 
-def tts_provider_health() -> dict[str, bool]:
-    """Report configured provider readiness; Edge still gets a live network probe per job."""
+def tts_provider_health() -> dict[str, Any]:
+    """Report configured provider readiness, Azure usage, and active provider."""
     demo_mode = os.getenv("DEMO_MODE", "").strip().lower() in {"1", "true", "yes"}
     selected = os.getenv("TTS_PROVIDER", "auto").strip().lower()
     azure_ready = bool(os.getenv("AZURE_SPEECH_KEY") and os.getenv("AZURE_SPEECH_REGION"))
-    mms_enabled = os.getenv("MMS_TTS_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+    mms_enabled = os.getenv("ENABLE_MMS_TTS", "1").strip().lower() not in {"0", "false", "no"}
+    edge_enabled = os.getenv("ENABLE_EDGE_TTS", "1").strip().lower() not in {"0", "false", "no"}
+    order = get_tts_provider_order()
+    primary = order[0] if order else "none"
+
+    from app.storage import get_monthly_azure_chars
+    azure_chars = get_monthly_azure_chars()
+    azure_cap = int(os.getenv("AZURE_MONTHLY_CHAR_CAP", "450000"))
+
     return {
-        "edge-tts": selected in {"auto", "edge", "edge-tts"},
-        "azure": selected in {"auto", "azure", "azure-speech"} and azure_ready,
-        "mms": selected in {"auto", "mms"} and mms_enabled,
+        "primary": primary,
+        "order": order,
+        "edge-tts": edge_enabled and ("edge" in order or "edge-tts" in order),
+        "azure": azure_ready and ("azure" in order or "azure-speech" in order),
+        "mms": mms_enabled and ("mms" in order),
         "demo": demo_mode and selected == "demo",
+        "azure_chars_used_month": azure_chars,
+        "azure_monthly_cap": azure_cap,
     }
 
 
-def synthesize_khmer(text: str, voice: str, destination: Path, duration: float, seed: int = 1, rate: str = "+0%") -> str:
+def synthesize_khmer(
+    text: str,
+    voice: str,
+    destination: Path,
+    duration: float,
+    seed: int = 1,
+    rate: str = "+0%",
+    forced_provider: str | None = None,
+) -> str:
     demo_mode = os.getenv("DEMO_MODE", "").strip().lower() in {"1", "true", "yes"}
     selected = os.getenv("TTS_PROVIDER", "auto").strip().lower()
     if selected == "none":
@@ -410,17 +488,21 @@ def synthesize_khmer(text: str, voice: str, destination: Path, duration: float, 
     clean_text = sanitize_text_for_tts(text)
 
     failures: list[str] = []
-    providers = [selected] if selected not in {"", "auto"} else ["edge", "azure", "mms"]
-    if "azure" in providers and not (os.getenv("AZURE_SPEECH_KEY") and os.getenv("AZURE_SPEECH_REGION")):
-        providers.remove("azure")
+    if forced_provider:
+        providers = [forced_provider]
+    elif selected not in {"", "auto"}:
+        providers = [selected]
+    else:
+        providers = get_tts_provider_order()
+
     for provider in providers:
         try:
+            if provider in {"azure", "azure-speech"}:
+                AzureTTSProvider().synthesize(clean_text, voice, destination, rate=rate)
+                return "azure-speech"
             if provider in {"edge", "edge-tts"}:
                 asyncio.run(EdgeTTSProvider().synthesize(clean_text, voice, destination, rate=rate))
                 return "edge-tts"
-            if provider in {"azure", "azure-speech"}:
-                AzureTTSProvider().synthesize(clean_text, voice, destination)
-                return "azure-speech"
             if provider == "mms":
                 MMSTTSProvider().synthesize(clean_text, destination)
                 return "mms-facebook/mms-tts-khm"
@@ -432,4 +514,5 @@ def synthesize_khmer(text: str, voice: str, destination: Path, duration: float, 
             destination.unlink(missing_ok=True)
             failures.append(f"{provider}:{type(exc).__name__}:{str(exc)[:180]}")
     detail = "; ".join(failures) or "no provider is enabled"
-    raise RuntimeError(f"TTS_UNAVAILABLE: Edge TTS -> Azure Speech (if configured) -> MMS failed ({detail}).")
+    order_str = " -> ".join(providers)
+    raise RuntimeError(f"TTS_UNAVAILABLE: {order_str} failed ({detail}).")

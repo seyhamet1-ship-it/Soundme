@@ -28,6 +28,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -146,8 +147,19 @@ def assert_media_quality(dubbed_mp4: Path, source_mp4: Path, srt_path: Path, vtt
     return results
 
 
+TEST_TOKEN = os.getenv("ACCESS_TOKENS", "soundme-test-token").split(",")[0].strip()
+AUTH_HEADERS = {"Authorization": f"Bearer {TEST_TOKEN}"}
+
+
 def run_fault_injection_chunked_upload() -> dict:
     """Test mid-upload connection drop and chunked resume."""
+    try:
+        with urllib.request.urlopen(f"{BASE_URL}/api/health", timeout=2) as r:
+            if r.status != 200:
+                pytest.skip(f"Server at {BASE_URL} not healthy")
+    except Exception:
+        pytest.skip(f"Live server not running at {BASE_URL}")
+
     # 1. Create a test file
     test_file = ROOT / "tests" / "fixtures" / "resumable_test.mp4"
     test_file.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +171,7 @@ def run_fault_injection_chunked_upload() -> dict:
 
     # 2. Init upload
     init_data = json.dumps({"filename": test_file.name, "total_size": size, "chunk_size": chunk_size}).encode("utf-8")
-    req = urllib.request.Request(f"{BASE_URL}/api/upload/init", data=init_data, headers={"Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(f"{BASE_URL}/api/upload/init", data=init_data, headers={"Content-Type": "application/json", **AUTH_HEADERS}, method="POST")
     with urllib.request.urlopen(req) as resp:
         meta = json.loads(resp.read().decode("utf-8"))
     uid = meta["upload_id"]
@@ -170,12 +182,13 @@ def run_fault_injection_chunked_upload() -> dict:
     with test_file.open("rb") as f:
         for idx in range(half):
             chunk = f.read(chunk_size)
-            r = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/chunk", data=chunk, headers={"X-Chunk-Index": str(idx)}, method="PUT")
+            r = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/chunk", data=chunk, headers={"X-Chunk-Index": str(idx), **AUTH_HEADERS}, method="PUT")
             with urllib.request.urlopen(r) as cr:
                 assert cr.status == 200
 
     # 4. Simulate dropped connection: query status
-    with urllib.request.urlopen(f"{BASE_URL}/api/upload/{uid}/status") as sr:
+    status_req = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/status", headers=AUTH_HEADERS)
+    with urllib.request.urlopen(status_req) as sr:
         st = json.loads(sr.read().decode("utf-8"))
     assert len(st["received_chunks"]) == half
     assert not st["complete"]
@@ -185,20 +198,20 @@ def run_fault_injection_chunked_upload() -> dict:
         f.seek(half * chunk_size)
         for idx in range(half, total_chunks):
             chunk = f.read(chunk_size)
-            r = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/chunk", data=chunk, headers={"X-Chunk-Index": str(idx)}, method="PUT")
+            r = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/chunk", data=chunk, headers={"X-Chunk-Index": str(idx), **AUTH_HEADERS}, method="PUT")
             with urllib.request.urlopen(r) as cr:
                 assert cr.status == 200
 
     # 6. Complete
     complete_payload = json.dumps({"source_lang": "en", "voice": "km-KH-SreymomNeural"}).encode("utf-8")
-    crq = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/complete", data=complete_payload, headers={"Content-Type": "application/json"}, method="POST")
+    crq = urllib.request.Request(f"{BASE_URL}/api/upload/{uid}/complete", data=complete_payload, headers={"Content-Type": "application/json", **AUTH_HEADERS}, method="POST")
     with urllib.request.urlopen(crq) as resp:
         job = json.loads(resp.read().decode("utf-8"))
     assert job["status"] == "queued"
 
     # Clean up job
     time.sleep(1)
-    urllib.request.urlopen(urllib.request.Request(f"{BASE_URL}/api/jobs/{job['id']}/cancel", data=b"", method="POST"))
+    urllib.request.urlopen(urllib.request.Request(f"{BASE_URL}/api/jobs/{job['id']}/cancel", data=b"", headers=AUTH_HEADERS, method="POST"))
 
     test_file.unlink(missing_ok=True)
     return {"check": "fault-injection/resumable-upload", "pass": True, "detail": f"uploaded {half} chunks, resumed {total_chunks - half} chunks successfully"}
