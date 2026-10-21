@@ -50,6 +50,10 @@ def _get_redirect_uri(request: Request) -> str:
     configured = os.getenv("GOOGLE_REDIRECT_URI")
     if configured:
         return configured
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    if host:
+        return f"{proto}://{host}/auth/callback"
     base = str(request.base_url).rstrip("/")
     return f"{base}/auth/callback"
 
@@ -176,7 +180,8 @@ def google_login(request: Request) -> RedirectResponse:
     redirect_uri = _get_redirect_uri(request)
     state = secrets.token_urlsafe(32)
     nonce = secrets.token_urlsafe(32)
-    next_url = str(request.query_params.get("next", "/"))
+    raw_next = str(request.query_params.get("next", "/"))
+    next_url = raw_next if (raw_next.startswith("/") and not raw_next.startswith("//")) else "/"
 
     try:
         request.session["oauth_state"] = state
@@ -298,7 +303,7 @@ async def google_callback(
     set_session(request, user_id, "google", email, session_data={"name": user_claims.get("name")})
 
     log.info("Google login successful: user_id=%s", user_id)
-    dest = next_url if next_url and next_url.startswith("/") else "/"
+    dest = next_url if (next_url and next_url.startswith("/") and not next_url.startswith("//")) else "/"
     sep = "&" if "?" in dest else "?"
     return RedirectResponse(url=f"{dest}{sep}login=success", status_code=302)
 
