@@ -66,35 +66,88 @@ def get_session_ttl() -> int:
 
 
 def get_session_user(request: Request) -> dict[str, Any] | None:
-    """Read and validate the session cookie. Returns session dict or None."""
+    """Read and validate the session cookie against server-side session store.
+    
+    Dual-layer security:
+    1. Signed cookie must be valid and unexpired
+    2. Session ID must exist in server-side DB (permits instant revocation)
+    """
     try:
         session = request.session
         user_id = session.get("user_id")
+        session_id = session.get("session_id")
         expires_at = session.get("expires_at", 0)
-        if user_id and time.time() < expires_at:
-            return {
-                "user_id": user_id,
-                "auth_mode": session.get("auth_mode", "token"),
-                "google_email": session.get("google_email"),
-            }
+        now = time.time()
+        if not user_id or now >= expires_at:
+            return None
+
+        # Verify against server-side sessions table if session_id is present
+        if session_id:
+            from app.storage import get_session
+            db_session = get_session(session_id)
+            if not db_session or db_session.get("user_id") != user_id:
+                # Revoked or expired server-side
+                clear_session(request)
+                return None
+
+        return {
+            "session_id": session_id,
+            "user_id": user_id,
+            "auth_mode": session.get("auth_mode", "token"),
+            "google_email": session.get("google_email"),
+        }
     except Exception:
         pass
     return None
 
 
-def set_session(request: Request, user_id: str, auth_mode: str, google_email: str | None = None) -> None:
-    """Write a session into the signed cookie store."""
+def set_session(
+    request: Request,
+    user_id: str,
+    auth_mode: str,
+    google_email: str | None = None,
+    session_data: dict[str, Any] | None = None,
+) -> str:
+    """Write a session into the server-side DB and signed cookie store.
+    Returns the cryptographically secure session_id.
+    """
+    import secrets
+    from app.storage import create_session
+
+    session_id = secrets.token_hex(32)
+    expires_at = time.time() + get_session_ttl()
+    extra = dict(session_data or {})
+    if google_email:
+        extra["google_email"] = google_email
+
+    # Persist in DB
     try:
+        create_session(session_id, user_id, auth_mode, expires_at, extra)
+    except Exception as exc:
+        log.warning("Failed to store session in DB: %s", exc)
+
+    # Store in signed cookie
+    try:
+        request.session["session_id"] = session_id
         request.session["user_id"] = user_id
         request.session["auth_mode"] = auth_mode
-        request.session["expires_at"] = time.time() + get_session_ttl()
+        request.session["expires_at"] = expires_at
         if google_email:
             request.session["google_email"] = google_email
     except Exception:
         pass  # Session middleware may not be present in unit tests
+    return session_id
 
 
 def clear_session(request: Request) -> None:
+    """Revoke server-side session and clear cookie."""
+    try:
+        session_id = request.session.get("session_id")
+        if session_id:
+            from app.storage import revoke_session
+            revoke_session(session_id)
+    except Exception:
+        pass
     try:
         request.session.clear()
     except Exception:

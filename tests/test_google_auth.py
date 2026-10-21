@@ -279,6 +279,255 @@ def test_valid_session_is_accepted(monkeypatch, tmp_path):
     assert result["user_id"] == "tok:abc123"
 
 
+# ── OIDC Claims Validation Negative Tests ────────────────────────────────────
+
+def test_verify_google_claims_valid(monkeypatch):
+    from app.google_auth import verify_google_claims
+    monkeypatch.delenv("GOOGLE_ALLOWED_EMAILS", raising=False)
+    monkeypatch.delenv("GOOGLE_ALLOWED_DOMAINS", raising=False)
+    claims = {
+        "sub": "1234567890",
+        "email": "tester@gmail.com",
+        "email_verified": True,
+        "aud": "my-client-id.apps.googleusercontent.com",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+        "nonce": "test-nonce",
+    }
+    ok, reason = verify_google_claims(claims, "my-client-id.apps.googleusercontent.com", "test-nonce")
+    assert ok is True
+    assert reason == "OK"
+
+
+def test_verify_google_claims_invalid_audience():
+    from app.google_auth import verify_google_claims
+    claims = {
+        "sub": "1234567890",
+        "email": "tester@gmail.com",
+        "email_verified": True,
+        "aud": "wrong-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+    }
+    ok, reason = verify_google_claims(claims, "expected-client-id")
+    assert ok is False
+    assert reason == "INVALID_AUDIENCE"
+
+
+def test_verify_google_claims_invalid_issuer():
+    from app.google_auth import verify_google_claims
+    claims = {
+        "sub": "1234567890",
+        "email": "tester@gmail.com",
+        "email_verified": True,
+        "aud": "my-client-id",
+        "iss": "https://evil-issuer.com",
+        "exp": time.time() + 3600,
+    }
+    ok, reason = verify_google_claims(claims, "my-client-id")
+    assert ok is False
+    assert reason == "INVALID_ISSUER"
+
+
+def test_verify_google_claims_expired_token():
+    from app.google_auth import verify_google_claims
+    claims = {
+        "sub": "1234567890",
+        "email": "tester@gmail.com",
+        "email_verified": True,
+        "aud": "my-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() - 3600,  # Expired
+    }
+    ok, reason = verify_google_claims(claims, "my-client-id")
+    assert ok is False
+    assert reason == "TOKEN_EXPIRED"
+
+
+def test_verify_google_claims_invalid_nonce():
+    from app.google_auth import verify_google_claims
+    claims = {
+        "sub": "1234567890",
+        "email": "tester@gmail.com",
+        "email_verified": True,
+        "aud": "my-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+        "nonce": "wrong-nonce",
+    }
+    ok, reason = verify_google_claims(claims, "my-client-id", expected_nonce="expected-nonce")
+    assert ok is False
+    assert reason == "INVALID_NONCE"
+
+
+def test_verify_google_claims_unverified_email():
+    from app.google_auth import verify_google_claims
+    claims = {
+        "sub": "1234567890",
+        "email": "unverified@gmail.com",
+        "email_verified": False,  # Unverified!
+        "aud": "my-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+    }
+    ok, reason = verify_google_claims(claims, "my-client-id")
+    assert ok is False
+    assert reason == "UNVERIFIED_EMAIL"
+
+
+def test_verify_google_claims_email_allowlist(monkeypatch):
+    from app.google_auth import verify_google_claims
+    monkeypatch.setenv("GOOGLE_ALLOWED_EMAILS", "allowed@example.com,tester@gmail.com")
+    claims = {
+        "sub": "1234567890",
+        "email": "blocked@gmail.com",
+        "email_verified": True,
+        "aud": "my-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+    }
+    ok, reason = verify_google_claims(claims, "my-client-id")
+    assert ok is False
+    assert reason == "EMAIL_NOT_ALLOWED"
+
+
+def test_verify_google_claims_domain_allowlist(monkeypatch):
+    from app.google_auth import verify_google_claims
+    monkeypatch.setenv("GOOGLE_ALLOWED_DOMAINS", "company.com")
+    # Disallowed domain
+    claims_bad = {
+        "sub": "123",
+        "email": "user@other.com",
+        "email_verified": True,
+        "aud": "my-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+    }
+    ok, reason = verify_google_claims(claims_bad, "my-client-id")
+    assert ok is False
+    assert reason == "EMAIL_NOT_ALLOWED"
+
+    # Allowed domain
+    claims_good = {
+        "sub": "123",
+        "email": "user@company.com",
+        "email_verified": True,
+        "aud": "my-client-id",
+        "iss": "https://accounts.google.com",
+        "exp": time.time() + 3600,
+    }
+    ok, reason = verify_google_claims(claims_good, "my-client-id")
+    assert ok is True
+
+
+# ── Server-Side Session Storage & Revocation Tests ────────────────────────────
+
+def test_server_side_session_creation_and_revocation(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    sid = "test-session-12345"
+    uid = "goo:user999"
+    expires = time.time() + 3600
+
+    # Create session in DB
+    storage.create_session(sid, uid, "google", expires, {"name": "Test User"})
+
+    # Session exists and is valid
+    sess = storage.get_session(sid)
+    assert sess is not None
+    assert sess["user_id"] == uid
+    assert sess["auth_mode"] == "google"
+    assert sess["data"]["name"] == "Test User"
+
+    # Revoke session
+    revoked = storage.revoke_session(sid)
+    assert revoked is True
+
+    # Revoked session returns None
+    assert storage.get_session(sid) is None
+
+
+def test_server_side_expired_session_cleanup(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    sid = "expired-session-123"
+    uid = "goo:user_expired"
+    past_time = time.time() - 3600  # 1 hour ago
+
+    storage.create_session(sid, uid, "google", past_time)
+
+    # get_session deletes expired sessions automatically
+    sess = storage.get_session(sid)
+    assert sess is None
+
+    # Cleanup function
+    cleaned = storage.cleanup_expired_sessions()
+    assert isinstance(cleaned, int)
+
+
+# ── OAuth State Replay Protection ─────────────────────────────────────────────
+
+def test_oauth_callback_rejects_missing_or_mismatched_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "fake-id")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "fake-secret")
+
+    with TestClient(app, follow_redirects=False) as client:
+        # Callback without state
+        r = client.get("/auth/callback?code=fake-code")
+        assert r.status_code == 302
+        assert "auth_error=invalid_state" in r.headers["location"]
+
+
+# ── Comprehensive Protected Route Cross-User Isolation ───────────────────────
+
+def test_all_protected_routes_enforce_isolation(monkeypatch, tmp_path):
+    """Verify that User B cannot access User A's resources across EVERY protected route."""
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    monkeypatch.setenv("ACCESS_TOKENS", f"{TEST_TOKEN},{ALT_TOKEN}")
+    _clear_rate_buckets()
+
+    # Create job owned by TEST_USER_ID
+    jid = uuid.uuid4().hex
+    src_file = tmp_path / "test_video.mp4"
+    src_file.write_bytes(b"dummy video content")
+    out_file = tmp_path / "dubbed_video.mp4"
+    out_file.write_bytes(b"dummy dubbed content")
+
+    storage.set_job(jid, {
+        "id": jid,
+        "user_id": TEST_USER_ID,
+        "owner_token": TEST_TOKEN,
+        "status": "awaiting_review",
+        "stage": "awaiting_review",
+        "progress": 50,
+        "source_path": str(src_file),
+        "filename": "test_video.mp4",
+        "options": {},
+        "segments": [{"id": 0, "start": 0, "end": 2, "text_km": "សួស្តី"}],
+        "outputs": {"video": "dubbed_video.mp4"},
+    })
+
+    with TestClient(app) as client:
+        # 1. GET /api/jobs/{id}
+        assert client.get(f"/api/jobs/{jid}", headers=_auth(ALT_TOKEN)).status_code == 404
+
+        # 2. GET /api/jobs/{id}/segments
+        assert client.get(f"/api/jobs/{jid}/segments", headers=_auth(ALT_TOKEN)).status_code == 404
+
+        # 3. PUT /api/jobs/{id}/segments
+        assert client.put(f"/api/jobs/{jid}/segments", json=[], headers=_auth(ALT_TOKEN)).status_code == 404
+
+        # 4. POST /api/jobs/{id}/cancel
+        assert client.post(f"/api/jobs/{jid}/cancel", headers=_auth(ALT_TOKEN)).status_code == 404
+
+        # 5. GET /api/jobs/{id}/download/video
+        assert client.get(f"/api/jobs/{jid}/download/video", headers=_auth(ALT_TOKEN)).status_code == 404
+
+        # 6. DELETE /api/jobs/{id}
+        assert client.delete(f"/api/jobs/{jid}", headers=_auth(ALT_TOKEN)).status_code == 404
+
+    _clear_rate_buckets()
+
+
 # ── /auth/callback — BLOCKED (real Google network required) ──────────────────
 
 def test_google_callback_blocked_without_real_credentials():

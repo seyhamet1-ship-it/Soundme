@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-10-21T03:28:43Z",
+  "generated_utc": "2026-10-21T03:40:03Z",
   "live": false,
   "full": false,
   "checks": [
@@ -7,43 +7,43 @@
       "name": "compile-app",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 0.5,
+      "elapsed_s": 0.4,
       "output_tail": ""
     },
     {
       "name": "pytest",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 25.9,
-      "output_tail": "...........................s..................s..................sssss.. [ 94%]\n....                                                                     [100%]\n69 passed, 7 skipped in 23.50s\n"
+      "elapsed_s": 30.7,
+      "output_tail": "...........................s..............................s............. [ 81%]\n.....sssss......                                                         [100%]\n81 passed, 7 skipped in 28.11s\n"
     },
     {
       "name": "mypy",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 17.0,
+      "elapsed_s": 19.4,
       "output_tail": ""
     },
     {
       "name": "frontend-tests",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 31.4,
-      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 test\n> vitest run\n\n\n\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mG:/My Drive/Soundme/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/App.test.jsx \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 236\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m5 passed\u001b[39m\u001b[22m\u001b[90m (5)\u001b[39m\n\u001b[2m   Start at \u001b[22m 10:27:30\n\u001b[2m   Duration \u001b[22m 27.45s\u001b[2m (transform 180ms, setup 0ms, collect 3.90s, tests 236ms, environment 13.22s, prepare 1.06s)\u001b[22m\n\n"
+      "elapsed_s": 39.5,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 test\n> vitest run\n\n\n\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mG:/My Drive/Soundme/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/App.test.jsx \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 292\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m5 passed\u001b[39m\u001b[22m\u001b[90m (5)\u001b[39m\n\u001b[2m   Start at \u001b[22m 10:38:35\n\u001b[2m   Duration \u001b[22m 35.26s\u001b[2m (transform 206ms, setup 0ms, collect 4.85s, tests 292ms, environment 17.21s, prepare 1.46s)\u001b[22m\n\n"
     },
     {
       "name": "frontend-lint",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 7.6,
+      "elapsed_s": 8.0,
       "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 lint\n> eslint src/App.jsx src/App.test.jsx src/main.jsx\n\n"
     },
     {
       "name": "frontend-build",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 13.6,
-      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 build\n> vite build\n\n\u001b[36mvite v5.4.21 \u001b[32mbuilding for production...\u001b[36m\u001b[39m\ntransforming...\n\u001b[32m✓\u001b[39m 37 modules transformed.\nrendering chunks...\ncomputing gzip size...\n\u001b[2mdist/\u001b[22m\u001b[32mindex.html                                                  \u001b[39m\u001b[1m\u001b[2m  0.55 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  0.35 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-DodaIRJA.woff2  \u001b[39m\u001b[1m\u001b[2m  6.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-D0NTkDRW.woff2  \u001b[39m\u001b[1m\u001b[2m  6.55 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-Bd3ZAoRX.woff   \u001b[39m\u001b[1m\u001b[2m  8.43 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-DTINSare.woff   \u001b[39m\u001b[1m\u001b[2m  8.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-BLI6HyUZ.woff2      \u001b[39m\u001b[1m\u001b[2m 10.62 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DuGo6TL7.woff2      \u001b[39m\u001b[1m\u001b[2m 10.76 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-Dek0CCYB.woff       \u001b[39m\u001b[1m\u001b[2m 13.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DlNc-L-D.woff       \u001b[39m\u001b[1m\u001b[2m 13.59 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-DnqNet9s.woff2      \u001b[39m\u001b[1m\u001b[2m 22.94 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-qwjLDidk.woff2      \u001b[39m\u001b[1m\u001b[2m 24.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-CfhpqDv8.woff       \u001b[39m\u001b[1m\u001b[2m 30.32 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-BUdGgDYy.woff       \u001b[39m\u001b[1m\u001b[2m 32.40 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[35massets/index-D11mGGFZ.css                                   \u001b[39m\u001b[1m\u001b[2m 17.56 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  4.69 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[36massets/index-CAojnVID.js                                    \u001b[39m\u001b[1m\u001b[2m240.69 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip: 76.27 kB\u001b[22m\n\u001b[32m✓ built in 11.22s\u001b[39m\n"
+      "elapsed_s": 15.2,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 build\n> vite build\n\n\u001b[36mvite v5.4.21 \u001b[32mbuilding for production...\u001b[36m\u001b[39m\ntransforming...\n\u001b[32m✓\u001b[39m 37 modules transformed.\nrendering chunks...\ncomputing gzip size...\n\u001b[2mdist/\u001b[22m\u001b[32mindex.html                                                  \u001b[39m\u001b[1m\u001b[2m  0.55 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  0.35 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-DodaIRJA.woff2  \u001b[39m\u001b[1m\u001b[2m  6.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-D0NTkDRW.woff2  \u001b[39m\u001b[1m\u001b[2m  6.55 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-Bd3ZAoRX.woff   \u001b[39m\u001b[1m\u001b[2m  8.43 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-DTINSare.woff   \u001b[39m\u001b[1m\u001b[2m  8.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-BLI6HyUZ.woff2      \u001b[39m\u001b[1m\u001b[2m 10.62 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DuGo6TL7.woff2      \u001b[39m\u001b[1m\u001b[2m 10.76 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-Dek0CCYB.woff       \u001b[39m\u001b[1m\u001b[2m 13.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DlNc-L-D.woff       \u001b[39m\u001b[1m\u001b[2m 13.59 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-DnqNet9s.woff2      \u001b[39m\u001b[1m\u001b[2m 22.94 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-qwjLDidk.woff2      \u001b[39m\u001b[1m\u001b[2m 24.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-CfhpqDv8.woff       \u001b[39m\u001b[1m\u001b[2m 30.32 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-BUdGgDYy.woff       \u001b[39m\u001b[1m\u001b[2m 32.40 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[35massets/index-D11mGGFZ.css                                   \u001b[39m\u001b[1m\u001b[2m 17.56 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  4.69 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[36massets/index-BueFsK25.js                                    \u001b[39m\u001b[1m\u001b[2m242.13 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip: 76.83 kB\u001b[22m\n\u001b[32m✓ built in 12.89s\u001b[39m\n"
     },
     {
       "name": "probe-edge-artifact-real-speech",
@@ -179,15 +179,15 @@
       "name": "idempotency-unit",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 4.0,
-      "output_tail": "...                                                                      [100%]\n3 passed in 1.66s\n"
+      "elapsed_s": 4.6,
+      "output_tail": "...                                                                      [100%]\n3 passed in 2.03s\n"
     },
     {
       "name": "server-restart-unit",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 2.7,
-      "output_tail": ".                                                                        [100%]\n1 passed in 0.39s\n"
+      "elapsed_s": 2.9,
+      "output_tail": ".                                                                        [100%]\n1 passed in 0.61s\n"
     },
     {
       "name": "phase8-item1-real-resume",
@@ -208,15 +208,15 @@
       "name": "phase9-auth-security",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 7.8,
-      "output_tail": "......................                                                   [100%]\n22 passed in 5.48s\n"
+      "elapsed_s": 10.5,
+      "output_tail": "......................                                                   [100%]\n22 passed in 7.95s\n"
     },
     {
       "name": "phase10-google-auth",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 5.0,
-      "output_tail": "...............                                                          [100%]\n15 passed in 2.69s\n"
+      "elapsed_s": 6.5,
+      "output_tail": "...........................                                              [100%]\n27 passed in 4.03s\n"
     },
     {
       "name": "phase9-no-secrets",

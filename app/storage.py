@@ -85,9 +85,14 @@ def _connect():
             "user_id TEXT NOT NULL,"
             "auth_mode TEXT NOT NULL,"
             "created_at REAL NOT NULL DEFAULT (unixepoch()),"
-            "expires_at REAL NOT NULL"
+            "expires_at REAL NOT NULL,"
+            "data TEXT"
             ")"
         )
+        try:
+            db.execute("ALTER TABLE sessions ADD COLUMN data TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         # Indexes
         db.execute("CREATE INDEX IF NOT EXISTS idx_jobs_user_id ON jobs(user_id)")
@@ -336,7 +341,52 @@ def cleanup_expired_jobs(ttl_hours: int = 24) -> int:
 
 
 def cleanup_expired_sessions(ttl_hours: int = 24) -> int:
-    cutoff = time.time() - (ttl_hours * 3600)
+    cutoff = time.time()
     with _lock, _connect() as db:
         result = db.execute("DELETE FROM sessions WHERE expires_at < ?", (cutoff,))
         return result.rowcount if hasattr(result, "rowcount") else 0
+
+
+def create_session(
+    session_id: str,
+    user_id: str,
+    auth_mode: str,
+    expires_at: float,
+    data: dict[str, Any] | None = None,
+) -> None:
+    data_str = json.dumps(data or {}, ensure_ascii=False)
+    with _lock, _connect() as db:
+        db.execute(
+            "INSERT OR REPLACE INTO sessions(session_id, user_id, auth_mode, created_at, expires_at, data) "
+            "VALUES(?, ?, ?, unixepoch(), ?, ?)",
+            (session_id, user_id, auth_mode, expires_at, data_str),
+        )
+
+
+def get_session(session_id: str) -> dict[str, Any] | None:
+    now = time.time()
+    with _lock, _connect() as db:
+        row = db.execute(
+            "SELECT session_id, user_id, auth_mode, created_at, expires_at, data FROM sessions WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return None
+        if float(row["expires_at"]) < now:
+            db.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+            return None
+    data_dict = json.loads(row["data"]) if row["data"] else {}
+    return {
+        "session_id": row["session_id"],
+        "user_id": row["user_id"],
+        "auth_mode": row["auth_mode"],
+        "created_at": float(row["created_at"]),
+        "expires_at": float(row["expires_at"]),
+        "data": data_dict,
+    }
+
+
+def revoke_session(session_id: str) -> bool:
+    with _lock, _connect() as db:
+        res = db.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+        return (res.rowcount or 0) > 0

@@ -34,7 +34,7 @@ function authHeaders(extra = {}) {
 
 function authFetch(url, opts = {}) {
   const headers = authHeaders(opts.headers || {});
-  return fetch(url, { ...opts, headers });
+  return fetch(url, { credentials: 'include', ...opts, headers });
 }
 
 export default function App() {
@@ -52,9 +52,46 @@ export default function App() {
   const [rows, Q] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [pendingUpload] = useState(() => localStorage.getItem('pendingUploadId'));
-  const [noToken, setNoToken] = useState(!TOKEN);
+  const [userSession, setUserSession] = useState(null);
+  const [noToken, setNoToken] = useState(() => !TOKEN);
 
   const t = (key) => strings[key]?.[en ? 'en' : 'km'] || key;
+
+  // ── Handle OAuth callback messages and session state on mount ───────────────
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location?.search || '');
+      const authErr = params.get('auth_error');
+      if (authErr) {
+        const errorMessages = {
+          google_denied: en ? 'Google sign-in was canceled or denied.' : 'ការចូលដោយប្រើ Google ត្រូវបានបោះបង់។',
+          token_exchange_failed: en ? 'Google authentication failed to connect.' : 'ការផ្ទៀងផ្ទាត់ Google បានបរាជ័យក្នុងការតភ្ជាប់។',
+          unverified_email: en ? 'Your Google email is unverified.' : 'អ៊ីមែល Google របស់អ្នកមិនទាន់បានផ្ទៀងផ្ទាត់ទេ។',
+          email_not_allowed: en ? 'Your Google account is not on the tester allowlist.' : 'គណនី Google របស់អ្នកមិនស្ថិតនៅក្នុងបញ្ជីអនុញ្ញាតទេ។',
+          invalid_state: en ? 'OAuth security validation failed (invalid state).' : 'ការផ្ទៀងផ្ទាត់សុវត្ថិភាព OAuth បានបរាជ័យ។',
+          missing_code: en ? 'No authorization code received from Google.' : 'មិនទទួលបានកូដអនុញ្ញាតពី Google ទេ។',
+        };
+        X(errorMessages[authErr] || (en ? `Authentication error: ${authErr}` : `កំហុសក្នុងការចូល: ${authErr}`));
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete('auth_error');
+        clean.searchParams.delete('login');
+        window.history.replaceState({}, '', clean.toString());
+      }
+    } catch (_) {
+      void 0;
+    }
+
+    // Check /auth/me for active session cookie (e.g. from Google OAuth)
+    fetch('/auth/me', { credentials: 'include' })
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.authenticated) {
+          setUserSession(d);
+          setNoToken(false);
+        }
+      })
+      .catch(() => {});
+  }, [en]);
 
   // ── Token gate: show input if missing ──────────────────────────────────────
   const [tokenInput, setTokenInput] = useState('');
@@ -277,6 +314,7 @@ export default function App() {
     d.append('review_before_tts', review);
     let x = new XMLHttpRequest();
     x.open('POST', A + '/jobs');
+    x.withCredentials = true;
     x.setRequestHeader('Idempotency-Key', idempotencyKey);
     if (TOKEN) x.setRequestHeader('Authorization', `Bearer ${TOKEN}`);
     x.upload.onprogress = (e) => e.lengthComputable && P(Math.round((e.loaded / e.total) * 100));
@@ -379,6 +417,7 @@ export default function App() {
     localStorage.removeItem('soundme_token');
     localStorage.removeItem('activeJob');
     TOKEN = '';
+    setUserSession(null);
     setNoToken(true);
   }
 
@@ -391,6 +430,11 @@ export default function App() {
           <p>{t('app_subtitle')}</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          {userSession?.google_email && (
+            <span style={{ fontSize: '0.8rem', color: '#64748b', background: '#f1f5f9', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>
+              👤 {userSession.google_email}
+            </span>
+          )}
           <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
           <button onClick={logout} title={en ? 'Sign out' : 'ចាកចេញ'} style={{ fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}>
             {en ? 'Sign out' : 'ចាកចេញ'}
