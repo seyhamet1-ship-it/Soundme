@@ -2,6 +2,9 @@
 
 All tests use FastAPI TestClient (no live server required).
 BLOCKED items are marked explicitly — never faked as PASS.
+
+Phase 10 update: uses user_id-keyed storage functions; backward-compat aliases
+preserved (_TOKEN_TIMESTAMPS = _USER_TIMESTAMPS in auth.py).
 """
 from __future__ import annotations
 
@@ -15,10 +18,12 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app import storage
-from app.auth import _TOKEN_TIMESTAMPS, _IP_TIMESTAMPS, _LOCK
+from app.auth import _TOKEN_TIMESTAMPS, _IP_TIMESTAMPS, _LOCK, token_to_user_id
 
 TEST_TOKEN = "soundme-test-token"
 ALT_TOKEN = "soundme-alt-token"
+TEST_USER_ID = token_to_user_id(TEST_TOKEN)
+ALT_USER_ID = token_to_user_id(ALT_TOKEN)
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLE = ROOT / "sample_input.mp4"
@@ -100,11 +105,18 @@ def test_valid_token_lists_jobs(monkeypatch, tmp_path):
         assert isinstance(r.json(), list)
 
 
-def test_token_via_query_param(monkeypatch, tmp_path):
+def test_token_via_query_param_blocked_in_phase10(monkeypatch, tmp_path):
+    """Phase 10: ?token= query param is intentionally NOT supported for API routes.
+    Tokens must be in Authorization header or session cookie to avoid URL leakage.
+    This test verifies the query param no longer authenticates (returns 401).
+    """
     monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
     with TestClient(app) as client:
         r = client.get(f"/api/jobs?token={TEST_TOKEN}")
-        assert r.status_code == 200
+        # Phase 10: query param auth removed — must be 401
+        assert r.status_code == 401, (
+            f"?token= query param should be rejected in Phase 10 (got {r.status_code})"
+        )
 
 
 # ── 5. Cross-token isolation ──────────────────────────────────────────────────
@@ -362,7 +374,7 @@ def test_daily_quota_exceeded_returns_429(monkeypatch, tmp_path):
     monkeypatch.setenv("DAILY_QUOTA_MINUTES", "1")
 
     # Record 1.5 min already used (exceeds 1-min quota)
-    storage.add_daily_quota_used(TEST_TOKEN, 1.5)
+    storage.add_daily_quota_used(TEST_USER_ID, 1.5)
 
     from app import api as api_mod
     with TestClient(app) as client:

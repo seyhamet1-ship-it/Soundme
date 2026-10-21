@@ -4,17 +4,17 @@ import strings from './i18n/strings.json';
 const A = '/api';
 
 // ── Auth token management ──────────────────────────────────────────────────
-// Token is read from:
-//  1. URL param ?token=xxx on first load (saved to localStorage)
-//  2. localStorage 'soundme_token'
-// All API calls attach Authorization: Bearer <token>.
+// Token is read from localStorage 'soundme_token'.
+// URL ?token= param is consumed on first load, saved, then removed from URL.
+// ALL API calls attach Authorization: Bearer <token> header — NEVER in URL.
+// For Google OAuth sessions, the browser sends the HttpOnly cookie automatically.
 function getToken() {
   try {
     const params = new URLSearchParams(window.location?.search || '');
     const urlToken = params.get('token');
     if (urlToken) {
       localStorage.setItem('soundme_token', urlToken);
-      // Clean the token from the URL bar (don't share it accidentally)
+      // Remove token from URL to prevent it appearing in server logs / Referer headers
       const clean = new URL(window.location.href);
       clean.searchParams.delete('token');
       window.history.replaceState({}, '', clean.toString());
@@ -99,7 +99,10 @@ export default function App() {
     let sse = null;
     let sseTimeout = null;
     try {
-      const sseUrl = `${A}/jobs/${job.id}/events${TOKEN ? `?token=${encodeURIComponent(TOKEN)}` : ''}`;
+      // Auth via Authorization header is not supported by EventSource API.
+      // SSE authenticates via session cookie (preferred) or falls back to polling.
+      // ?token= query param intentionally removed to prevent tokens in server logs.
+      const sseUrl = `${A}/jobs/${job.id}/events`;
       sse = new EventSource(sseUrl);
       sseTimeout = setTimeout(() => {
         // If SSE hasn't delivered any message within 5 s, switch to polling
@@ -336,12 +339,20 @@ export default function App() {
         </header>
         <div className="grid">
           <section className="card">
-            <h2>{en ? 'Access Code Required' : 'តម្រូវការលេខកូដចូល'}</h2>
+            <h2>{en ? 'Sign In' : 'ចូលប្រើប្រាស់'}</h2>
             <p className="notice">
               {en
-                ? 'This service is private. Enter your access code to continue.'
-                : 'សេវាកម្មនេះជាឯកជន។ សូមបញ្ចូលលេខកូដចូលដើម្បីបន្ត។'}
+                ? 'This service is private. Enter your access code or sign in with Google.'
+                : 'សេវាកម្មនេះជាឯកជន។ សូមបញ្ចូលលេខកូដចូល ឬចូលដោយប្រើ Google។'}
             </p>
+            {/* Google OAuth login */}
+            <a href="/auth/google" style={{ display: 'block', textAlign: 'center', background: '#fff', border: '1px solid #dadce0', borderRadius: '0.375rem', padding: '0.6rem', marginBottom: '0.75rem', color: '#3c4043', textDecoration: 'none', fontWeight: 500 }}>
+              <span style={{ marginRight: '0.5rem' }}>🔵</span>
+              {en ? 'Continue with Google' : 'បន្តជាមួយ Google'}
+            </a>
+            <div style={{ textAlign: 'center', color: '#94a3b8', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
+              {en ? '— or enter access code —' : '— ឬបញ្ចូលលេខកូដចូល —'}
+            </div>
             <input
               type="password"
               placeholder={en ? 'Access code' : 'លេខកូដចូល'}
@@ -360,6 +371,17 @@ export default function App() {
   }
 
   let stages = ['queued', 'transcribe', 'translate', 'voice', 'mix', 'done'];
+
+  async function logout() {
+    try {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (_) { /* ignore */ }
+    localStorage.removeItem('soundme_token');
+    localStorage.removeItem('activeJob');
+    TOKEN = '';
+    setNoToken(true);
+  }
+
   return (
     <main>
       <header>
@@ -368,7 +390,12 @@ export default function App() {
           <h1>{t('app_title')}</h1>
           <p>{t('app_subtitle')}</p>
         </div>
-        <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
+          <button onClick={logout} title={en ? 'Sign out' : 'ចាកចេញ'} style={{ fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}>
+            {en ? 'Sign out' : 'ចាកចេញ'}
+          </button>
+        </div>
       </header>
       <div className="grid">
         <section className="card">

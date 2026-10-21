@@ -468,6 +468,9 @@ def main() -> int:
 
     # Phase 9: Deploy-test package verifications
     checks.append(run("phase9-auth-security", [sys.executable, "-m", "pytest", "tests/test_auth_security.py", "-q", "--tb=short"]))
+
+    # Phase 10: Google OAuth and session authentication verifications
+    checks.append(run("phase10-google-auth", [sys.executable, "-m", "pytest", "tests/test_google_auth.py", "-q", "--tb=short"]))
     
     # Secrets check in repo
     def check_repo_secrets() -> dict:

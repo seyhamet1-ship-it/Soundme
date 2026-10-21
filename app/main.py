@@ -10,11 +10,13 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.api import router
 from app.auth import cleanup_expired_files
+from app.google_auth import router as google_auth_router
 from app.providers import is_models_ready, tts_provider_health, warm_models
-from app.storage import recover_jobs
+from app.storage import recover_jobs, run_migration
 
 log = logging.getLogger("dubber")
 
@@ -38,6 +40,8 @@ def check_storage_drive() -> bool:
 async def lifespan(app: FastAPI):
     # Check data directory for network/virtual filesystem warnings
     check_storage_drive()
+    # Phase 10: backfill user_id on existing jobs from owner_token (safe, idempotent)
+    run_migration()
     # Recover any running jobs interrupted by server restart
     recover_jobs()
     # TTL Cleanup for stale uploads and outputs (default 24h)
@@ -58,6 +62,18 @@ app = FastAPI(
     version="1.0.0",
     description="Translate Chinese or English video into Khmer speech and subtitles.",
     lifespan=lifespan,
+)
+
+# Session middleware (must be added before CORS and route handlers)
+# SECRET_KEY must be set in production; falls back to a random key (sessions won't persist across restarts)
+_secret_key = os.getenv("SECRET_KEY") or os.urandom(32).hex()
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_secret_key,
+    session_cookie="soundme_session",
+    max_age=int(os.getenv("SESSION_TTL_HOURS", "24")) * 3600,
+    https_only=os.getenv("SESSION_HTTPS_ONLY", "0").strip().lower() not in {"0", "false", "no"},
+    same_site="lax",
 )
 
 # CORS limited to public origin
@@ -103,6 +119,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
+app.include_router(google_auth_router)
 app.include_router(router)
 
 

@@ -9,7 +9,7 @@ from app.storage import (
     delete_job, get_idempotent_job, get_job, list_jobs, recover_jobs,
     set_idempotent_job, set_job, update_job
 )
-from app.auth import get_current_token, check_queue_capacity, check_daily_quota
+from app.auth import get_current_token, get_current_user, get_user_id_from_request, check_queue_capacity, check_daily_quota
 from app.i18n import get_km
 
 router = APIRouter(dependencies=[Depends(get_current_token)])
@@ -44,10 +44,12 @@ async def create_job(
     review_before_tts: bool = Form(False),
     idempotency_key: str | None = Header(None, alias='Idempotency-Key')
 ):
-    token = get_current_token(request)
+    user = get_current_user(request)
+    user_id = user["user_id"]
+    token = user.get("_token") or user_id  # backward compat
     check_queue_capacity()
     if idempotency_key:
-        existing = get_idempotent_job(idempotency_key, owner_token=token)
+        existing = get_idempotent_job(idempotency_key, user_id=user_id)
         if existing:
             return {'id': existing['id'], 'job_id': existing['id'], 'status': existing.get('status', 'queued')}
     if source_lang not in {'auto', 'zh', 'en'}:
@@ -72,7 +74,7 @@ async def create_job(
             raise HTTPException(400, get_km('file_empty'))
         meta = await asyncio.to_thread(probe, path)
         dur = float(meta.get('format', {}).get('duration', 0))
-        check_daily_quota(token, dur / 60.0)
+        check_daily_quota(user_id, dur / 60.0)
     except HTTPException:
         shutil.rmtree(folder, ignore_errors=True)
         raise
@@ -97,6 +99,7 @@ async def create_job(
     job_data = {
         'id': jid,
         'owner_token': token,
+        'user_id': user_id,
         'status': 'queued',
         'stage': 'queued',
         'progress': 0,
@@ -112,27 +115,27 @@ async def create_job(
 
 @router.get('/api/jobs')
 def jobs(request: Request):
-    token = get_current_token(request)
-    return list_jobs(owner_token=token)
+    user_id = get_user_id_from_request(request)
+    return list_jobs(user_id=user_id)
 
 @router.get('/api/jobs/{jid}')
 def status(jid: str, request: Request):
-    token = get_current_token(request)
-    job = get_job(jid, owner_token=token)
+    user_id = get_user_id_from_request(request)
+    job = get_job(jid, user_id=user_id)
     if not job:
         raise HTTPException(404, 'Job not found')
     return job
 
 @router.get('/api/jobs/{jid}/events')
 async def events(jid: str, request: Request):
-    token = get_current_token(request)
-    if not get_job(jid, owner_token=token):
+    user_id = get_user_id_from_request(request)
+    if not get_job(jid, user_id=user_id):
         raise HTTPException(404, 'Job not found')
 
     async def gen():
         previous = None
         for _ in range(3600):
-            item = get_job(jid, owner_token=token)
+            item = get_job(jid, user_id=user_id)
             if item != previous:
                 yield 'data: ' + json.dumps(item, ensure_ascii=False) + '\n\n'
                 previous = item
@@ -144,24 +147,24 @@ async def events(jid: str, request: Request):
 
 @router.get('/api/jobs/{jid}/segments')
 def segments(jid: str, request: Request):
-    token = get_current_token(request)
-    item = get_job(jid, owner_token=token)
+    user_id = get_user_id_from_request(request)
+    item = get_job(jid, user_id=user_id)
     if not item:
         raise HTTPException(404, 'Job not found')
     return item.get('segments', [])
 
 @router.put('/api/jobs/{jid}/segments')
 def edit_segments(jid: str, payload: list[dict], request: Request):
-    token = get_current_token(request)
-    if not get_job(jid, owner_token=token):
+    user_id = get_user_id_from_request(request)
+    if not get_job(jid, user_id=user_id):
         raise HTTPException(404, 'Job not found')
     update_job(jid, segments=payload)
     return {'ok': True}
 
 @router.post('/api/jobs/{jid}/resume')
 def resume(jid: str, request: Request):
-    token = get_current_token(request)
-    item = get_job(jid, owner_token=token)
+    user_id = get_user_id_from_request(request)
+    item = get_job(jid, user_id=user_id)
     if not item or item.get('status') != 'awaiting_review':
         raise HTTPException(409, 'Job is not awaiting review')
     from app.render import render
@@ -182,8 +185,8 @@ def resume(jid: str, request: Request):
 
 @router.post('/api/jobs/{jid}/cancel')
 def cancel(jid: str, request: Request):
-    token = get_current_token(request)
-    item = get_job(jid, owner_token=token)
+    user_id = get_user_id_from_request(request)
+    item = get_job(jid, user_id=user_id)
     if not item:
         raise HTTPException(404, 'Job not found')
     update_job(jid, status='canceled', stage='canceled')
@@ -195,8 +198,8 @@ def cancel(jid: str, request: Request):
 
 @router.delete('/api/jobs/{jid}')
 def remove(jid: str, request: Request):
-    token = get_current_token(request)
-    item = get_job(jid, owner_token=token)
+    user_id = get_user_id_from_request(request)
+    item = get_job(jid, user_id=user_id)
     if not item:
         raise HTTPException(404, 'Job not found')
     delete_job(jid)
@@ -211,8 +214,8 @@ def download(jid: str, kind: str, request: Request):
     if kind not in {'video', 'audio', 'srt', 'vtt', 'json', 'source'}:
         raise HTTPException(400, 'Invalid download kind')
 
-    token = get_current_token(request)
-    item = get_job(jid, owner_token=token)
+    user_id = get_user_id_from_request(request)
+    item = get_job(jid, user_id=user_id)
     if not item:
         raise HTTPException(404, 'Job not found')
     outputs = item.get('outputs', {})
@@ -273,7 +276,9 @@ CHUNK_DIR.mkdir(exist_ok=True)
 
 @router.post('/api/upload/init')
 async def upload_init(payload: dict, request: Request):
-    token = get_current_token(request)
+    user = get_current_user(request)
+    user_id = user["user_id"]
+    token = user.get("_token") or user_id
     check_queue_capacity()
     raw_name = str(payload.get('filename') or 'video.mp4')
     if '..' in raw_name or '/' in raw_name or '\\' in raw_name:
@@ -296,6 +301,7 @@ async def upload_init(payload: dict, request: Request):
     meta = {
         'upload_id': uid,
         'owner_token': token,
+        'user_id': user_id,
         'filename': fname,
         'total_size': total_size,
         'chunk_size': chunk_size,
@@ -312,13 +318,21 @@ async def upload_chunk(
     x_chunk_index: int = Header(..., alias='X-Chunk-Index'),
     x_chunk_checksum: str | None = Header(None, alias='X-Chunk-Checksum')
 ):
-    token = get_current_token(request)
+    user = get_current_user(request)
+    user_id = user["user_id"]
+    token = user.get("_token") or user_id
     u_folder = CHUNK_DIR / uid
     meta_file = u_folder / 'meta.json'
     if not meta_file.exists():
         raise HTTPException(404, 'Upload session not found')
     meta = json.loads(meta_file.read_text(encoding='utf-8'))
-    if meta.get('owner_token') and meta['owner_token'] != token:
+    # Check ownership by user_id first, fall back to owner_token
+    meta_uid = meta.get('user_id')
+    meta_token = meta.get('owner_token')
+    if meta_uid:
+        if meta_uid != user_id:
+            raise HTTPException(404, 'Upload session not found')
+    elif meta_token and meta_token != token:
         raise HTTPException(404, 'Upload session not found')
     if x_chunk_index < 0 or x_chunk_index >= meta['total_chunks']:
         raise HTTPException(400, f'Invalid chunk index {x_chunk_index}')
@@ -344,13 +358,20 @@ async def upload_chunk(
 
 @router.get('/api/upload/{uid}/status')
 def upload_status(uid: str, request: Request):
-    token = get_current_token(request)
+    user = get_current_user(request)
+    user_id = user["user_id"]
+    token = user.get("_token") or user_id
     u_folder = CHUNK_DIR / uid
     meta_file = u_folder / 'meta.json'
     if not meta_file.exists():
         raise HTTPException(404, 'Upload session not found')
     meta = json.loads(meta_file.read_text(encoding='utf-8'))
-    if meta.get('owner_token') and meta['owner_token'] != token:
+    meta_uid = meta.get('user_id')
+    meta_token = meta.get('owner_token')
+    if meta_uid:
+        if meta_uid != user_id:
+            raise HTTPException(404, 'Upload session not found')
+    elif meta_token and meta_token != token:
         raise HTTPException(404, 'Upload session not found')
     received = sorted(int(p.stem) for p in u_folder.glob('*.part'))
     return {
@@ -365,7 +386,9 @@ def upload_status(uid: str, request: Request):
 
 @router.post('/api/upload/{uid}/complete')
 async def upload_complete(uid: str, request: Request, payload: dict | None = None):
-    token = get_current_token(request)
+    user = get_current_user(request)
+    user_id = user["user_id"]
+    token = user.get("_token") or user_id
     check_queue_capacity()
     opts_in = payload or {}
     u_folder = CHUNK_DIR / uid
@@ -373,7 +396,12 @@ async def upload_complete(uid: str, request: Request, payload: dict | None = Non
     if not meta_file.exists():
         raise HTTPException(404, 'Upload session not found')
     meta = json.loads(meta_file.read_text(encoding='utf-8'))
-    if meta.get('owner_token') and meta['owner_token'] != token:
+    meta_uid = meta.get('user_id')
+    meta_token = meta.get('owner_token')
+    if meta_uid:
+        if meta_uid != user_id:
+            raise HTTPException(404, 'Upload session not found')
+    elif meta_token and meta_token != token:
         raise HTTPException(404, 'Upload session not found')
     parts = sorted(u_folder.glob('*.part'))
     if len(parts) != meta['total_chunks']:
@@ -381,7 +409,7 @@ async def upload_complete(uid: str, request: Request, payload: dict | None = Non
 
     idempotency_key = opts_in.get('idempotency_key')
     if idempotency_key:
-        existing = get_idempotent_job(idempotency_key, owner_token=token)
+        existing = get_idempotent_job(idempotency_key, user_id=user_id)
         if existing:
             shutil.rmtree(u_folder, ignore_errors=True)
             return {'id': existing['id'], 'job_id': existing['id'], 'status': existing.get('status', 'queued')}
@@ -422,7 +450,7 @@ async def upload_complete(uid: str, request: Request, payload: dict | None = Non
             raise HTTPException(413, get_km('upload_too_large'))
         probe_data = await asyncio.to_thread(probe, target_path)
         dur = float(probe_data.get('format', {}).get('duration', 0))
-        check_daily_quota(token, dur / 60.0)
+        check_daily_quota(user_id, dur / 60.0)
     except HTTPException:
         shutil.rmtree(job_folder, ignore_errors=True)
         shutil.rmtree(u_folder, ignore_errors=True)
@@ -451,6 +479,7 @@ async def upload_complete(uid: str, request: Request, payload: dict | None = Non
     job_data = {
         'id': jid,
         'owner_token': token,
+        'user_id': user_id,
         'status': 'queued',
         'stage': 'queued',
         'progress': 0,
