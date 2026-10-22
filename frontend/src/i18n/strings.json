@@ -158,5 +158,93 @@
   "demo_review_check": {
     "km": "សូមពិនិត្យការបកប្រែនេះ",
     "en": "Please review this translation"
+  },
+  "download_video": {
+    "km": "ទាញយកវីដេអូ",
+    "en": "Download Video"
+  },
+  "download_audio": {
+    "km": "ទាញយកសំឡេង",
+    "en": "Download Audio"
+  },
+  "download_srt": {
+    "km": "ទាញយកចំណងជើង (SRT)",
+    "en": "Download Subtitles (SRT)"
+  },
+  "download_vtt": {
+    "km": "ទាញយកចំណងជើង (VTT)",
+    "en": "Download Captions (VTT)"
+  },
+  "download_history": {
+    "km": "ទាញយក MP4",
+    "en": "Download MP4"
+  },
+  "dubbing_complete": {
+    "km": "ការបកសំឡេងបានសម្រេចជាស្ថាពរ",
+    "en": "Dubbing Complete"
+  },
+  "dubbed_video_heading": {
+    "km": "វីដេអូបកប្រែជាភាសាខ្មែរ · Dubbed",
+    "en": "Dubbed Video (Khmer)"
+  },
+  "original_video_heading": {
+    "km": "វីដេអូដើម · Original",
+    "en": "Original Video"
+  },
+  "compare_view": {
+    "km": "ប្រៀបធៀបទន្ទឹមគ្នា",
+    "en": "Compare Side-by-Side"
+  },
+  "single_view": {
+    "km": "មើលវីដេអូបកប្រែ",
+    "en": "Dubbed Video Only"
+  },
+  "view_result_btn": {
+    "km": "មើលលទ្ធផល",
+    "en": "View Result"
+  },
+  "nav_dashboard": {
+    "km": "ផ្ទាំងគ្រប់គ្រង",
+    "en": "Dashboard"
+  },
+  "nav_dubbing": {
+    "km": "ការបកសំឡេងវីដេអូ",
+    "en": "Video Dubbing"
+  },
+  "nav_history": {
+    "km": "ប្រវត្តិ",
+    "en": "History"
+  },
+  "nav_settings": {
+    "km": "ការកំណត់ & ព័ត៌មាន",
+    "en": "Settings & Info"
+  },
+  "google_signin": {
+    "km": "បន្តជាមួយ Google",
+    "en": "Continue with Google"
+  },
+  "sign_in": {
+    "km": "ចូលប្រើប្រាស់",
+    "en": "Sign In"
+  },
+  "sign_out": {
+    "km": "ចាកចេញ",
+    "en": "Sign out"
+  },
+  "or_access_code": {
+    "km": "— ឬបញ្ចូលលេខកូដចូល —",
+    "en": "— or enter access code —"
+  },
+  "access_code_placeholder": {
+    "km": "លេខកូដចូល",
+    "en": "Access code"
+  },
+  "continue_btn": {
+    "km": "បន្ត",
+    "en": "Continue"
+  },
+  "download_json": {
+    "km": "ទាញយកអត្ថបទ (JSON)",
+    "en": "Download Transcript (JSON)"
   }
 }

@@ -7,8 +7,14 @@ There is no self-registration. Tokens are distributed by the operator.
 
 **Token passing (any one of):**
 - `Authorization: Bearer <token>` header
-- `X-Access-Token: <token>` header  
-- `?token=<token>` query parameter
+- `X-Access-Token: <token>` header
+- Session cookie (HttpOnly) issued by the Google OAuth login flow
+
+> **Note:** The `?token=<token>` query parameter is **not** accepted. Tokens in URLs
+> leak into server access logs, browser history, and `Referer` headers, so the API
+> rejects them with **HTTP 401**. The frontend therefore fetches protected media
+> (video/audio/subtitle downloads) via `fetch()` with an `Authorization` header and
+> creates a local `blob:` object URL for the player / download link.
 
 **Per-token isolation:** Token A cannot read, list, download, or modify Token B's jobs, segments, chunks, or outputs. Cross-token access returns 404.
 

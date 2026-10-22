@@ -12,15 +12,18 @@ from app.storage import (
 from app.auth import get_current_token, get_current_user, get_user_id_from_request, check_queue_capacity, check_daily_quota
 from app.i18n import get_km
 
+from app.config import UPLOAD_DIR, OUTPUT_DIR, BASE_DIR
+from app.config import MAX_UPLOAD_MB, MAX_UPLOAD_BYTES, MAX_VIDEO_SECONDS
+
 router = APIRouter(dependencies=[Depends(get_current_token)])
-ROOT = Path(__file__).resolve().parents[1]
-UPLOADS = ROOT / 'uploads'
-OUTPUTS = ROOT / 'outputs'
+public_router = APIRouter()
+UPLOADS = UPLOAD_DIR
+OUTPUTS = OUTPUT_DIR
+ROOT = BASE_DIR  # project root — path-traversal security boundary for downloads
 UPLOADS.mkdir(exist_ok=True)
 OUTPUTS.mkdir(exist_ok=True)
 
 POOL = ThreadPoolExecutor(max_workers=int(os.getenv("MAX_CONCURRENT_JOBS", "1")))
-from app.config import MAX_UPLOAD_MB, MAX_UPLOAD_BYTES, MAX_VIDEO_SECONDS
 
 def safe_filename(name: str) -> str:
     base = Path(name or 'video.mp4').name
@@ -243,14 +246,14 @@ def download(jid: str, kind: str, request: Request):
     }[kind]
     return FileResponse(path, media_type=typ, filename=path.name)
 
-@router.get('/api/voices')
+@public_router.get('/api/voices')
 def voices():
     return [
         {'id': 'km-KH-SreymomNeural', 'name': 'Sreymom', 'gender': 'female'},
         {'id': 'km-KH-PisethNeural', 'name': 'Piseth', 'gender': 'male'}
     ]
 
-@router.post('/api/tts/preview')
+@public_router.post('/api/tts/preview')
 def preview(payload: dict):
     from app.providers import synthesize_khmer
     from app.i18n import get_km

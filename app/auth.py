@@ -22,10 +22,14 @@ from fastapi import HTTPException, Request
 
 log = logging.getLogger("dubber.auth")
 
-ROOT = Path(__file__).resolve().parents[1]
-UPLOADS = ROOT / "uploads"
-OUTPUTS = ROOT / "outputs"
-CHUNK_DIR = UPLOADS / "_chunks"
+from app.config import UPLOAD_DIR, OUTPUT_DIR
+
+# Use config-based paths read from .env at startup.
+# Falls back to hardcoded project-relative paths if UPLOAD_DIR/OUTPUT_DIR
+# are not set in the environment (backward compatibility).
+UPLOADS = UPLOAD_DIR
+OUTPUTS = OUTPUT_DIR
+CHUNK_DIR = UPLOAD_DIR / "_chunks"
 
 _LOCK = threading.RLock()
 # Rate-limit buckets keyed by user_id

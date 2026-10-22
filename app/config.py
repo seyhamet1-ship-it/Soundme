@@ -37,13 +37,26 @@ TOOLS_DIR.mkdir(parents=True, exist_ok=True)
 # Always prefer the project-local tools directory so subprocesses can find ffmpeg/ffprobe.
 os.environ["PATH"] = str(TOOLS_DIR) + os.pathsep + os.environ.get("PATH", "")
 
-UPLOAD_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "outputs"
-FRONTEND_DIR = BASE_DIR / "frontend"
+# ── Configurable storage directories ──────────────────────────────────────────
+# Read from .env: UPLOAD_DIR and OUTPUT_DIR, falling back to BASE_DIR subpaths.
+# This allows deploying on a local SSD without Google Drive path warnings.
+_UPLOAD_DIR_FROM_ENV = os.getenv("UPLOAD_DIR")
+_OUTPUT_DIR_FROM_ENV = os.getenv("OUTPUT_DIR")
 
-UPLOAD_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
-FRONTEND_DIR.mkdir(exist_ok=True, parents=True)
+if _UPLOAD_DIR_FROM_ENV:
+    UPLOAD_DIR = Path(_UPLOAD_DIR_FROM_ENV)
+else:
+    UPLOAD_DIR = BASE_DIR / "uploads"
+
+if _OUTPUT_DIR_FROM_ENV:
+    OUTPUT_DIR = Path(_OUTPUT_DIR_FROM_ENV)
+else:
+    OUTPUT_DIR = BASE_DIR / "outputs"
+
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+FRONTEND_DIR = BASE_DIR / "frontend"
 
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024

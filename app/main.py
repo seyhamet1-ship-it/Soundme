@@ -7,12 +7,13 @@ import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from starlette.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import router
+from app.api import router, public_router
 from app.auth import cleanup_expired_files
 from app.google_auth import router as google_auth_router
 from app.providers import is_models_ready, tts_provider_health, warm_models
@@ -120,6 +121,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(google_auth_router)
+app.include_router(public_router)
 app.include_router(router)
 
 
@@ -142,3 +144,19 @@ def health():
         "tts": tts_info,
         "workers": int(os.getenv("MAX_CONCURRENT_JOBS", "1")),
     }
+
+
+ROOT = Path(__file__).resolve().parents[1]
+_DIST = ROOT / "frontend" / "dist"
+if (_DIST / "index.html").is_file():
+    if (_DIST / "assets").is_dir():
+        app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("auth/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        file_path = _DIST / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(_DIST / "index.html")

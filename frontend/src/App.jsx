@@ -1,20 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import strings from './i18n/strings.json';
 
 const A = '/api';
 
 // ── Auth token management ──────────────────────────────────────────────────
-// Token is read from localStorage 'soundme_token'.
-// URL ?token= param is consumed on first load, saved, then removed from URL.
-// ALL API calls attach Authorization: Bearer <token> header — NEVER in URL.
-// For Google OAuth sessions, the browser sends the HttpOnly cookie automatically.
 function getToken() {
   try {
     const params = new URLSearchParams(window.location?.search || '');
     const urlToken = params.get('token');
     if (urlToken) {
       localStorage.setItem('soundme_token', urlToken);
-      // Remove token from URL to prevent it appearing in server logs / Referer headers
       const clean = new URL(window.location.href);
       clean.searchParams.delete('token');
       window.history.replaceState({}, '', clean.toString());
@@ -28,7 +23,7 @@ function getToken() {
 let TOKEN = getToken();
 
 function authHeaders(extra = {}) {
-  if (TOKEN) return { Authorization: `Bearer ${TOKEN}`, ...extra };
+  if (TOKEN) return { Authorization: `Bearer ${TOKEN}`, 'X-Access-Token': TOKEN, ...extra };
   return extra;
 }
 
@@ -37,8 +32,84 @@ function authFetch(url, opts = {}) {
   return fetch(url, { credentials: 'include', ...opts, headers });
 }
 
+// ── Authenticated download helpers ──────────────────────────────────────────
+async function downloadWithAuth(kind, jid, filename) {
+  const res = await authFetch(`${A}/jobs/${jid}/download/${kind}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  if (filename) a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function fetchVideoBlobUrl(kind, jid) {
+  return authFetch(`${A}/jobs/${jid}/download/${kind}`)
+    .then((r) => (r.ok ? r.blob() : null))
+    .then((blob) => (blob ? URL.createObjectURL(blob) : null));
+}
+
+// ── Authenticated SSE ───────────────────────────────────────────────────────
+function sseSubscribe(url, onMessage, onError) {
+  const controller = new AbortController();
+  const stop = () => controller.abort();
+
+  (async () => {
+    let res;
+    try {
+      res = await authFetch(url, {
+        signal: controller.signal,
+        headers: { Accept: 'text/event-stream' },
+      });
+    } catch (err) {
+      if (err?.name !== 'AbortError') onError?.();
+      return;
+    }
+    if (!res.ok || !res.body) {
+      onError?.();
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                onMessage(JSON.parse(line.slice(6)));
+              } catch (e) {
+                void e;
+              }
+            }
+          }
+        }
+      }
+      onError?.();
+    } catch (err) {
+      if (err?.name !== 'AbortError') onError?.();
+    }
+  })();
+
+  return stop;
+}
+
 export default function App() {
   const [en, E] = useState(false);
+  const [activeTab, setActiveTab] = useState('workspace');
+  const [compareMode, setCompareMode] = useState(true);
   const [file, F] = useState(null);
   const [source, S] = useState('auto');
   const [voice, V] = useState('km-KH-SreymomNeural');
@@ -54,10 +125,12 @@ export default function App() {
   const [pendingUpload] = useState(() => localStorage.getItem('pendingUploadId'));
   const [userSession, setUserSession] = useState(null);
   const [noToken, setNoToken] = useState(() => !TOKEN);
+  const [videoBlobUrls, setVideoBlobUrls] = useState({});
+  const [tokenInput, setTokenInput] = useState('');
 
   const t = (key) => strings[key]?.[en ? 'en' : 'km'] || key;
 
-  // ── Handle OAuth callback messages and session state on mount ───────────────
+  // ── Session probe & OAuth callback check on mount ──────────────────────────
   useEffect(() => {
     try {
       const params = new URLSearchParams(window.location?.search || '');
@@ -81,7 +154,6 @@ export default function App() {
       void 0;
     }
 
-    // Check /auth/me for active session cookie (e.g. from Google OAuth)
     fetch('/auth/me', { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => {
@@ -93,8 +165,6 @@ export default function App() {
       .catch(() => {});
   }, [en]);
 
-  // ── Token gate: show input if missing ──────────────────────────────────────
-  const [tokenInput, setTokenInput] = useState('');
   function submitToken() {
     const v = tokenInput.trim();
     if (!v) return;
@@ -105,93 +175,139 @@ export default function App() {
 
   // ── Load active job and history on mount ───────────────────────────────────
   useEffect(() => {
-    if (noToken) return;
     let id = localStorage.getItem('activeJob');
-    if (id) J({ id });
-    authFetch(A + '/jobs').then((r) => r.json()).then(H).catch(() => {});
+    if (id) {
+      J({ id });
+    }
+    authFetch(A + '/jobs')
+      .then((r) => r.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          H(data);
+          if (!id && data.length > 0) {
+            const comp = data.find((x) => x.status === 'completed') || data[0];
+            if (comp) {
+              J(comp);
+              if (comp.segments) Q(comp.segments);
+            }
+          }
+        }
+      })
+      .catch(() => {});
   }, [noToken]);
 
   // ── Job polling with SSE → polling fallback ────────────────────────────────
   useEffect(() => {
-    if (!job?.id || noToken) return;
+    if (!job?.id) return;
     let live = true;
     let sseAlive = false;
     let timer = null;
+    let stopSse = null;
+    let sseTimeout = null;
+    let finished = false;
+
+    const TERMINAL = ['completed', 'failed', 'canceled'];
+
+    const refreshHistory = () => {
+      authFetch(A + '/jobs')
+        .then((r) => r.json())
+        .then((data) => Array.isArray(data) && H(data))
+        .catch(() => {});
+    };
+
+    const applyJob = (d) => {
+      if (!live) return;
+      J(d);
+      if (d.segments) Q(d.segments);
+      if (TERMINAL.includes(d.status)) {
+        finished = true;
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+        stopSse?.();
+        stopSse = null;
+        localStorage.removeItem('activeJob');
+        refreshHistory();
+      }
+    };
 
     const poll = () =>
       authFetch(`${A}/jobs/${job.id}`)
         .then((r) => r.json())
-        .then((d) => {
-          if (!live) return;
-          J(d);
-          if (d.segments) Q(d.segments);
-          if (['completed', 'failed', 'canceled'].includes(d.status)) {
-            localStorage.removeItem('activeJob');
-            authFetch(A + '/jobs').then((r) => r.json()).then(H);
-          }
-        })
+        .then(applyJob)
         .catch(() => {});
 
-    // Attempt SSE first; fall back to polling after 5 s if nothing arrives
-    let sse = null;
-    let sseTimeout = null;
-    try {
-      // Auth via Authorization header is not supported by EventSource API.
-      // SSE authenticates via session cookie (preferred) or falls back to polling.
-      // ?token= query param intentionally removed to prevent tokens in server logs.
-      const sseUrl = `${A}/jobs/${job.id}/events`;
-      sse = new EventSource(sseUrl);
-      sseTimeout = setTimeout(() => {
-        // If SSE hasn't delivered any message within 5 s, switch to polling
-        if (!sseAlive && live) {
-          sse?.close();
-          poll();
-          timer = setInterval(poll, 1300);
-        }
-      }, 5000);
-
-      sse.onmessage = (e) => {
-        sseAlive = true;
-        clearTimeout(sseTimeout);
-        if (!live) return;
-        try {
-          const d = JSON.parse(e.data);
-          J(d);
-          if (d.segments) Q(d.segments);
-          if (['completed', 'failed', 'canceled'].includes(d.status)) {
-            sse?.close();
-            localStorage.removeItem('activeJob');
-            authFetch(A + '/jobs').then((r) => r.json()).then(H);
-          }
-        } catch (err) {
-          void err;
-        }
-      };
-
-      sse.onerror = () => {
-        if (!sseAlive && live) {
-          // SSE failed before delivering anything → fall back to polling
-          clearTimeout(sseTimeout);
-          sse?.close();
-          poll();
-          timer = setInterval(poll, 1300);
-        } else {
-          sse?.close();
-        }
-      };
-    } catch {
-      // EventSource not supported → polling only
+    const startPolling = () => {
+      if (timer || !live || finished) return;
       poll();
       timer = setInterval(poll, 1300);
+    };
+
+    try {
+      stopSse = sseSubscribe(
+        `${A}/jobs/${job.id}/events`,
+        (d) => {
+          sseAlive = true;
+          clearTimeout(sseTimeout);
+          applyJob(d);
+        },
+        () => {
+          if (live && !finished) {
+            clearTimeout(sseTimeout);
+            stopSse = null;
+            startPolling();
+          }
+        },
+      );
+      sseTimeout = setTimeout(() => {
+        if (!sseAlive && live && !finished) {
+          stopSse?.();
+          stopSse = null;
+          startPolling();
+        }
+      }, 5000);
+    } catch {
+      startPolling();
     }
 
     return () => {
       live = false;
       clearTimeout(sseTimeout);
-      sse?.close();
+      stopSse?.();
       if (timer) clearInterval(timer);
     };
   }, [job?.id, noToken]);
+
+  // ── Fetch blob URLs for video players when job completes ───────────────────
+  useEffect(() => {
+    if (!job?.id || job.status !== 'completed') {
+      setVideoBlobUrls({});
+      return;
+    }
+    let cancelled = false;
+    const urls = {};
+    Promise.all([
+      fetchVideoBlobUrl('video', job.id),
+      fetchVideoBlobUrl('source', job.id),
+    ]).then(([videoUrl, sourceUrl]) => {
+      if (cancelled) {
+        videoUrl && URL.revokeObjectURL(videoUrl);
+        sourceUrl && URL.revokeObjectURL(sourceUrl);
+        return;
+      }
+      urls.video = videoUrl;
+      urls.source = sourceUrl;
+      setVideoBlobUrls({ video: videoUrl, source: sourceUrl });
+    });
+    return () => {
+      cancelled = true;
+      Object.values(urls).forEach((u) => u && URL.revokeObjectURL(u));
+    };
+  }, [job?.id, job?.status]);
+
+  const localFileUrl = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file]);
+  useEffect(() => () => { if (localFileUrl) URL.revokeObjectURL(localFileUrl); }, [localFileUrl]);
 
   function pick(f) {
     X('');
@@ -217,8 +333,7 @@ export default function App() {
 
   async function uploadChunked() {
     setSubmitting(true);
-    // Chunk size ≤ 8 MB as required (Cloudflare limit); upload ≤ 3 chunks in parallel
-    const CHUNK_SIZE = 5 * 1024 * 1024; // 5 MB chunks (well within 8 MB limit)
+    const CHUNK_SIZE = 5 * 1024 * 1024;
     const PARALLEL = 3;
     let totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
@@ -242,7 +357,6 @@ export default function App() {
       let st = await stRes.json();
       let receivedSet = new Set(st.received_chunks || []);
 
-      // Upload chunks in batches of PARALLEL (≤ 3 in flight at once)
       const pending = [];
       for (let i = 0; i < totalChunks; i++) {
         if (receivedSet.has(i)) { P(Math.round(((i + 1) / totalChunks) * 100)); continue; }
@@ -294,6 +408,10 @@ export default function App() {
 
   function upload() {
     if (submitting) return;
+    if (noToken && !userSession?.authenticated) {
+      X(en ? 'Please sign in with Google or enter an access code first.' : 'សូមចូលដោយប្រើ Google ឬបញ្ចូលលេខកូដចូលជាមុនសិន។');
+      return;
+    }
     if (!file || file.size === 0) { X(t('file_empty')); return; }
     if (file.size > 500 * 1024 * 1024) {
       let actualMb = (file.size / (1024 * 1024)).toFixed(1);
@@ -364,52 +482,6 @@ export default function App() {
     J({ ...job, status: 'running' });
   }
 
-  // ── Token gate UI ──────────────────────────────────────────────────────────
-  if (noToken) {
-    return (
-      <main>
-        <header>
-          <div>
-            <small>SOUNDME · KHMER STUDIO</small>
-            <h1>{t('app_title')}</h1>
-          </div>
-          <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
-        </header>
-        <div className="grid">
-          <section className="card">
-            <h2>{en ? 'Sign In' : 'ចូលប្រើប្រាស់'}</h2>
-            <p className="notice">
-              {en
-                ? 'This service is private. Enter your access code or sign in with Google.'
-                : 'សេវាកម្មនេះជាឯកជន។ សូមបញ្ចូលលេខកូដចូល ឬចូលដោយប្រើ Google។'}
-            </p>
-            {/* Google OAuth login */}
-            <a href="/auth/google" style={{ display: 'block', textAlign: 'center', background: '#fff', border: '1px solid #dadce0', borderRadius: '0.375rem', padding: '0.6rem', marginBottom: '0.75rem', color: '#3c4043', textDecoration: 'none', fontWeight: 500 }}>
-              <span style={{ marginRight: '0.5rem' }}>🔵</span>
-              {en ? 'Continue with Google' : 'បន្តជាមួយ Google'}
-            </a>
-            <div style={{ textAlign: 'center', color: '#94a3b8', marginBottom: '0.75rem', fontSize: '0.85rem' }}>
-              {en ? '— or enter access code —' : '— ឬបញ្ចូលលេខកូដចូល —'}
-            </div>
-            <input
-              type="password"
-              placeholder={en ? 'Access code' : 'លេខកូដចូល'}
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && submitToken()}
-              style={{ width: '100%', padding: '0.6rem', borderRadius: '0.375rem', border: '1px solid #e2e8f0', marginBottom: '0.75rem' }}
-            />
-            <button className="primary" onClick={submitToken}>
-              {en ? 'Continue' : 'បន្ត'}
-            </button>
-          </section>
-        </div>
-      </main>
-    );
-  }
-
-  let stages = ['queued', 'transcribe', 'translate', 'voice', 'mix', 'done'];
-
   async function logout() {
     try {
       await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
@@ -421,173 +493,495 @@ export default function App() {
     setNoToken(true);
   }
 
+  const stages = ['queued', 'transcribe', 'translate', 'voice', 'mix', 'done'];
+
   return (
-    <main>
-      <header>
-        <div>
-          <small>SOUNDME · KHMER STUDIO</small>
-          <h1>{t('app_title')}</h1>
-          <p>{t('app_subtitle')}</p>
+    <div className="app-container">
+      {/* ── Modern SaaS Navigation Header ───────────────────────────────── */}
+      <nav className="top-navbar">
+        <div className="nav-brand">
+          <div className="brand-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="22" />
+            </svg>
+          </div>
+          <div className="brand-title-wrap">
+            <span className="brand-title">Soundme AI</span>
+            <span className="brand-subtitle">Khmer Studio</span>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          {userSession?.google_email && (
-            <span style={{ fontSize: '0.8rem', color: '#64748b', background: '#f1f5f9', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>
-              👤 {userSession.google_email}
-            </span>
-          )}
-          <button onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
-          <button onClick={logout} title={en ? 'Sign out' : 'ចាកចេញ'} style={{ fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}>
-            {en ? 'Sign out' : 'ចាកចេញ'}
+
+        <div className="nav-tabs">
+          <button
+            className={`nav-tab ${activeTab === 'workspace' ? 'active' : ''}`}
+            onClick={() => setActiveTab('workspace')}
+          >
+            {t('nav_dashboard')}
+          </button>
+          <button
+            className={`nav-tab ${activeTab === 'history' ? 'active' : ''}`}
+            onClick={() => setActiveTab('history')}
+          >
+            {t('nav_history')}
+          </button>
+          <button
+            className={`nav-tab ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => setActiveTab('settings')}
+          >
+            {t('nav_settings')}
           </button>
         </div>
-      </header>
-      <div className="grid">
-        <section className="card">
-          <h2>{t('upload_heading')}</h2>
-          {pendingUpload && (
-            <div className="notice resume-notice" style={{ background: '#e0e7ff', color: '#3730a3', padding: '0.6rem 0.8rem', borderRadius: '0.375rem', marginBottom: '0.75rem', fontSize: '0.875rem', border: '1px solid #c7d2fe' }}>
-              {en ? '🔄 Resumable upload detected from previous session. Select file to resume.' : '🔄 បានរកឃើញការផ្ទុកឡើងដែលអាចបន្តពីមុន។ សូមជ្រើសរើសឯកសារដើម្បីបន្ត។'}
-            </div>
+
+        <div className="nav-right">
+          {userSession?.google_email ? (
+            <span className="user-badge" title={userSession.google_email}>
+              👤 {userSession.google_email}
+            </span>
+          ) : (
+            <a
+              href="/auth/google"
+              className="google-nav-btn"
+              style={{
+                textDecoration: 'none',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                color: '#f8fafc',
+                background: 'rgba(255, 255, 255, 0.08)',
+                padding: '0.4rem 0.8rem',
+                borderRadius: '8px',
+                fontSize: '0.825rem',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span>{en ? 'Continue with Google' : 'ចូលដោយប្រើ Google'}</span>
+            </a>
           )}
-          <label
-            className="drop"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files[0]); }}
-          >
-            <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
-            <b>＋</b>
-            <strong>{file?.name || t('upload_heading')}</strong>
-            <span>MP4 · MOV · MKV · WEBM · 500 MB max</span>
-          </label>
-          {file && file.size > 0 && typeof URL.createObjectURL === 'function' && <video className="preview" controls src={URL.createObjectURL(file)} />}
-          <div className="fields">
-            <label>
-              {t('source_lang')}
-              <select value={source} onChange={(e) => S(e.target.value)}>
-                <option value="auto">Auto</option>
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-              </select>
-            </label>
-            <label>
-              {t('khmer_voice')}
-              <select value={voice} onChange={(e) => V(e.target.value)}>
-                <option value="km-KH-SreymomNeural">{t('voice_sreymom')}</option>
-                <option value="km-KH-PisethNeural">{t('voice_piseth')}</option>
-              </select>
-            </label>
-          </div>
-          <button className="secondary" onClick={previewVoice}>{t('preview_voice_btn')}</button>
-          <div className="checks">
-            {[
-              [bg, B, t('keep_background')],
-              [burn, U, t('burn_subtitles')],
-              [review, R, t('review_before_tts')],
-            ].map(([v, set, label]) => (
-              <label key={label}>
-                <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          <p className="notice">{t('ownership_notice')} {en ? 'Files are deleted after 24 h.' : 'ឯកសារត្រូវបានលុបបន្ទាប់ពី 24 ម៉ោង។'}</p>
-          {bg && (
-            <p className="notice" style={{ fontSize: '0.75rem', marginTop: '-0.25rem', color: '#64748b' }}>
-              {en ? 'Audio ducking enabled for background preservation.' : 'ប្រើប្រាស់ Audio Ducking សម្រាប់រក្សាតន្ត្រីផ្ទៃខាងក្រោយ។'}
-            </p>
-          )}
-          {file && file.size > 20e6 && (
-            <p className="notice long-job-warning" style={{ color: '#d97706', fontWeight: 500 }}>
-              {t('long_job_eta')}
-            </p>
-          )}
-          {file && !job && (
-            <button className="primary" onClick={upload} disabled={submitting}>{t('start_dubbing')}</button>
-          )}
-          {pct > 0 && <progress value={pct} max="100" aria-label="Upload progress" />}
-          {err && <p role="alert" className="error">{err}</p>}
-        </section>
-        <section className="card">
-          <h2>{t('processing_heading')}</h2>
-          {stages.map((s, i) => (
-            <div key={s} className={'stage ' + (stages.indexOf(job?.stage) >= i ? 'done' : '')}>
-              <i>{i + 1}</i>
-              {['Upload', 'Transcribe', 'Translate', 'Voice', 'Mix', 'Done'][i]}
-            </div>
-          ))}
-          <progress value={job?.progress || pct} max="100" />
-          <p>
-            {job?.status === 'queued' ? (en ? 'Queued (waiting for slot)' : 'កំពុងរង់ចាំក្នុងជួរ · Queued') : (job?.stage || t('stage_waiting'))} · {job?.progress || pct || 0}%
-            {job?.eta_seconds > 0 && (
-              <span className="eta-badge" style={{ marginLeft: '0.75rem', color: '#6366f1', fontWeight: 600 }}>
-                ({en ? 'ETA: ~' : 'នៅសល់ប្រហែល ~'}{Math.ceil(job.eta_seconds / 60)} {en ? 'min' : 'នាទី'})
-              </span>
-            )}
-          </p>
-          {job?.error && (
-            <p role="alert" className="error">
-              [{job.error.code || 'PROCESSING_FAILED'}] {en ? job.error.message_en : job.error.message_km}
-            </p>
-          )}
-          {job && ['queued', 'running'].includes(job.status) && (
-            <button className="secondary" onClick={() => authFetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' })}>
-              {t('cancel_btn')}
+
+          <button className="lang-btn" onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
+          {(!noToken || userSession?.authenticated) && (
+            <button className="signout-btn" onClick={logout} title={en ? 'Sign out' : 'ចាកចេញ'}>
+              {en ? 'Sign out' : 'ចាកចេញ'}
             </button>
           )}
-          {job?.status === 'completed' && (
-            <>
-              <div className="players-compare" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
-                <div>
-                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>{en ? 'Original Video' : 'វីដេអូដើម · Original'}</h4>
-                  <video className="preview original-player" aria-label="Original video" controls src={file ? URL.createObjectURL(file) : `${A}/jobs/${job.id}/download/source?token=${encodeURIComponent(TOKEN)}`} style={{ width: '100%', borderRadius: '0.5rem' }} />
-                </div>
-                <div>
-                  <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem' }}>{en ? 'Dubbed Video (Khmer)' : 'វីដេអូបកប្រែជាភាសាខ្មែរ · Dubbed'}</h4>
-                  <video className="preview dubbed-player" aria-label="Dubbed video" controls src={`${A}/jobs/${job.id}/download/video?token=${encodeURIComponent(TOKEN)}`} style={{ width: '100%', borderRadius: '0.5rem' }} />
+        </div>
+      </nav>
+
+      <main>
+        {/* ── Brand Title Header (Preserved for tests) ──────────────────── */}
+        <header>
+          <div>
+            <small>SOUNDME · KHMER STUDIO</small>
+            <h1>{t('app_title')}</h1>
+            <p>{t('app_subtitle')}</p>
+          </div>
+        </header>
+
+        {/* ── Prominent Google Login Banner (when not authenticated) ──── */}
+        {noToken && !userSession?.authenticated && (
+          <section className="login-banner card card-full" style={{ marginBottom: '1.5rem', background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.95))', borderColor: 'rgba(99, 102, 241, 0.25)' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1.25rem' }}>
+              <div>
+                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>🔐</span> {en ? 'Sign in to Soundme AI' : 'ចូលប្រើប្រាស់ Soundme AI'}
+                </h3>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: '#94a3b8' }}>
+                  {en
+                    ? 'Private access. Continue with Google or enter your access code.'
+                    : 'សេវាកម្មឯកជន។ សូមបន្តជាមួយ Google ឬបញ្ចូលលេខកូដចូល។'}
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem' }}>
+                <a href="/auth/google" className="google-login-btn" style={{ padding: '0.65rem 1.25rem', fontSize: '0.9rem' }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                  </svg>
+                  <span>{en ? 'Continue with Google' : 'បន្តជាមួយ Google'}</span>
+                </a>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="password"
+                    className="login-input"
+                    placeholder={en ? 'Access code' : 'លេខកូដចូល'}
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && submitToken()}
+                    style={{ width: '150px', padding: '0.6rem 0.75rem', fontSize: '0.85rem' }}
+                  />
+                  <button className="primary" onClick={submitToken} style={{ padding: '0.6rem 1rem', fontSize: '0.85rem' }}>
+                    {en ? 'Enter' : 'ចូល'}
+                  </button>
                 </div>
               </div>
-              <nav style={{ marginTop: '1rem' }}>
-                {['video', 'audio', 'srt', 'vtt'].map((k) => (
-                  <a key={k} href={`${A}/jobs/${job.id}/download/${k}?token=${encodeURIComponent(TOKEN)}`} download>
-                    Download {k.toUpperCase()}
-                  </a>
-                ))}
-              </nav>
-            </>
-          )}
-        </section>
-      </div>
-      {job?.status === 'awaiting_review' && (
-        <section className="card">
-          <h2>{t('review_heading')}</h2>
-          {rows.map((r, i) => (
-            <label className="review" key={r.id}>
-              {r.start.toFixed(1)}s · {r.source_text}
-              <textarea
-                value={r.text_km}
-                onChange={(e) => Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))}
-              />
-            </label>
-          ))}
-          <button className="primary" onClick={save}>{t('save_and_continue')}</button>
-        </section>
-      )}
-      <section className="card">
-        <h2>{t('job_history')}</h2>
-        {jobs.length ? (
-          jobs
-            .slice(0, 8)
-            .map((j) => (
-              <p className="history" key={j.id}>
-                {j.filename || j.id} · {j.status}{' '}
-                {j.status === 'completed' && <a href={`${A}/jobs/${j.id}/download/video?token=${encodeURIComponent(TOKEN)}`}>MP4</a>}
-              </p>
-            ))
-        ) : (
-          <p>{t('history_empty')}</p>
+            </div>
+            {err && <p className="error" style={{ marginTop: '0.75rem' }}>{err}</p>}
+          </section>
         )}
-      </section>
-      <footer>Local processing · Upload content you have permission to use · Files deleted after 24 h.</footer>
-    </main>
+
+        {activeTab === 'workspace' && (
+          <>
+            <div className="grid">
+              {/* ── Left Column: Upload Workspace ───────────────────────── */}
+              <section className="card">
+                <h2>{t('upload_heading')}</h2>
+
+                {pendingUpload && (
+                  <div className="notice resume-notice" style={{ background: 'rgba(99, 102, 241, 0.15)', borderColor: 'rgba(99, 102, 241, 0.3)', color: '#a5b4fc' }}>
+                    {en ? '🔄 Resumable upload detected from previous session. Select file to resume.' : '🔄 បានរកឃើញការផ្ទុកឡើងដែលអាចបន្តពីមុន។ សូមជ្រើសរើសឯកសារដើម្បីបន្ត។'}
+                  </div>
+                )}
+
+                <label
+                  className="drop"
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); pick(e.dataTransfer.files[0]); }}
+                >
+                  <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
+                  <b>＋</b>
+                  <strong>{file?.name || t('upload_heading')}</strong>
+                  <span>MP4 · MOV · MKV · WEBM · 500 MB max</span>
+                </label>
+
+                {file && file.size > 0 && typeof URL.createObjectURL === 'function' && (
+                  <video className="preview" controls src={localFileUrl} />
+                )}
+
+                <div className="fields">
+                  <label>
+                    {t('source_lang')}
+                    <select value={source} onChange={(e) => S(e.target.value)}>
+                      <option value="auto">Auto</option>
+                      <option value="en">English</option>
+                      <option value="zh">中文</option>
+                    </select>
+                  </label>
+                  <label>
+                    {t('khmer_voice')}
+                    <select value={voice} onChange={(e) => V(e.target.value)}>
+                      <option value="km-KH-SreymomNeural">{t('voice_sreymom')}</option>
+                      <option value="km-KH-PisethNeural">{t('voice_piseth')}</option>
+                    </select>
+                  </label>
+                </div>
+
+                <button type="button" className="secondary" onClick={previewVoice} style={{ marginBottom: '0.85rem' }}>
+                  {t('preview_voice_btn')}
+                </button>
+
+                <div className="checks">
+                  {[
+                    [bg, B, t('keep_background')],
+                    [burn, U, t('burn_subtitles')],
+                    [review, R, t('review_before_tts')],
+                  ].map(([v, set, label]) => (
+                    <label key={label}>
+                      <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+
+                <p className="notice">
+                  {t('ownership_notice')} {en ? 'Files are deleted after 24 h.' : 'ឯកសារត្រូវបានលុបបន្ទាប់ពី 24 ម៉ោង។'}
+                </p>
+
+                {bg && (
+                  <p className="notice" style={{ fontSize: '0.75rem', marginTop: '-0.25rem', color: '#94a3b8' }}>
+                    {en ? 'Audio ducking enabled for background preservation.' : 'ប្រើប្រាស់ Audio Ducking សម្រាប់រក្សាតន្ត្រីផ្ទៃខាងក្រោយ។'}
+                  </p>
+                )}
+
+                {file && file.size > 20e6 && (
+                  <p className="notice long-job-warning" style={{ color: '#fbbf24', fontWeight: 500 }}>
+                    {t('long_job_eta')}
+                  </p>
+                )}
+
+                {file && (!job || job.status === 'completed' || job.status === 'failed') && (
+                  <button className="primary" onClick={upload} disabled={submitting}>
+                    {submitting ? (en ? 'Uploading...' : 'កំពុងផ្ទុកឡើង...') : t('start_dubbing')}
+                  </button>
+                )}
+
+                {pct > 0 && <progress value={pct} max="100" aria-label="Upload progress" />}
+                {err && <p role="alert" className="error">{err}</p>}
+              </section>
+
+              {/* ── Right Column: Pipeline Monitor ─────────────────────── */}
+              <section className="card">
+                <h2>{t('processing_heading')}</h2>
+
+                <div className="stages-wrapper">
+                  {stages.map((s, i) => (
+                    <div key={s} className={'stage ' + (stages.indexOf(job?.stage) >= i ? 'done' : '')}>
+                      <i>{i + 1}</i>
+                      {['Upload', 'Transcribe', 'Translate', 'Voice', 'Mix', 'Done'][i]}
+                    </div>
+                  ))}
+                </div>
+
+                <progress value={job?.progress || pct} max="100" />
+
+                <p style={{ margin: '0.5rem 0' }}>
+                  {job?.status === 'queued'
+                    ? (en ? 'Queued (waiting for slot)' : 'កំពុងរង់ចាំក្នុងជួរ · Queued')
+                    : (job?.stage || t('stage_waiting'))} · {job?.progress || pct || 0}%
+                  {job?.eta_seconds > 0 && (
+                    <span className="eta-badge" style={{ marginLeft: '0.75rem', color: '#10b981', fontWeight: 600 }}>
+                      ({en ? 'ETA: ~' : 'នៅសល់ប្រហែល ~'}{Math.ceil(job.eta_seconds / 60)} {en ? 'min' : 'នាទី'})
+                    </span>
+                  )}
+                </p>
+
+                {job?.error && (
+                  <p role="alert" className="error">
+                    [{job.error.code || 'PROCESSING_FAILED'}] {en ? job.error.message_en : job.error.message_km}
+                  </p>
+                )}
+
+                {job && ['queued', 'running'].includes(job.status) && (
+                  <button
+                    className="secondary"
+                    onClick={() => authFetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' })}
+                    style={{ marginTop: '0.75rem', width: '100%' }}
+                  >
+                    {t('cancel_btn')}
+                  </button>
+                )}
+
+                {job?.status === 'completed' && (
+                  <p style={{ margin: '1rem 0 0', color: '#10b981', fontWeight: 600 }}>
+                    ✓ {t('dubbing_complete')} — {en ? 'See result below' : 'ចូលមើលលទ្ធផលខាងក្រោម'}
+                  </p>
+                )}
+              </section>
+            </div>
+
+            {/* ── Translation Review Section (if awaiting review) ──────── */}
+            {job?.status === 'awaiting_review' && (
+              <section className="card card-full">
+                <h2>{t('review_heading')}</h2>
+                {rows.map((r, i) => (
+                  <label className="review" key={r.id}>
+                    <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>{r.start.toFixed(1)}s · {r.source_text}</span>
+                    <textarea
+                      value={r.text_km}
+                      onChange={(e) => Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))}
+                    />
+                  </label>
+                ))}
+                <button className="primary" onClick={save} style={{ marginTop: '1rem' }}>
+                  {t('save_and_continue')}
+                </button>
+              </section>
+            )}
+
+            {/* ── Dedicated Dubbing Complete Showcase (BELOW WORKSPACE) ─── */}
+            {job?.status === 'completed' && (
+              <section className="result-showcase">
+                <div className="result-header">
+                  <div className="result-badge">
+                    <span>✓</span>
+                    <span>{t('dubbing_complete')}</span>
+                  </div>
+
+                  <div className="view-mode-toggle">
+                    <button
+                      className={`view-mode-btn ${!compareMode ? 'active' : ''}`}
+                      onClick={() => setCompareMode(false)}
+                    >
+                      {t('single_view')}
+                    </button>
+                    <button
+                      className={`view-mode-btn ${compareMode ? 'active' : ''}`}
+                      onClick={() => setCompareMode(true)}
+                    >
+                      {t('compare_view')}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="players-container">
+                  {compareMode ? (
+                    <div className="players-compare">
+                      <div className="player-box">
+                        <h4>{t('original_video_heading')}</h4>
+                        <video
+                          className="preview original-player"
+                          aria-label="Original video"
+                          controls
+                          src={file ? localFileUrl : (videoBlobUrls.source || undefined)}
+                        />
+                      </div>
+                      <div className="player-box">
+                        <h4>{t('dubbed_video_heading')}</h4>
+                        <video
+                          className="preview dubbed-player"
+                          aria-label="Dubbed video"
+                          controls
+                          src={videoBlobUrls.video || undefined}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <video
+                        className="preview dubbed-player"
+                        aria-label="Dubbed video"
+                        controls
+                        src={videoBlobUrls.video || undefined}
+                        style={{ maxHeight: '440px', margin: '0 auto' }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="download-bar">
+                  <button
+                    className="download-link main-download"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      try {
+                        await downloadWithAuth('video', job.id, 'soundme_video.video');
+                      } catch {
+                        X(en ? 'Download failed. Please try again.' : t('processing_failed'));
+                      }
+                    }}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    {t('download_video')}
+                  </button>
+
+                  {['audio', 'srt', 'vtt'].map((k) => (
+                    <button
+                      key={k}
+                      className="download-link"
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        const ext = k === 'audio' ? 'wav' : k;
+                        try {
+                          await downloadWithAuth(k, job.id, `soundme_${k}.${ext}`);
+                        } catch {
+                          X(en ? 'Download failed.' : t('processing_failed'));
+                        }
+                      }}
+                    >
+                      {t(`download_${k}`)}
+                    </button>
+                  ))}
+
+                  <button
+                    className="download-link"
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      try {
+                        await downloadWithAuth('json', job.id, `soundme_transcript.json`);
+                      } catch {
+                        X(en ? 'Download failed.' : t('processing_failed'));
+                      }
+                    }}
+                  >
+                    {t('download_json')}
+                  </button>
+                </div>
+              </section>
+            )}
+          </>
+        )}
+
+        {/* ── Recent Jobs History ─────────────────────────────────────────── */}
+        {(activeTab === 'history' || activeTab === 'workspace') && (
+          <section className="card card-full">
+            <h2>{t('job_history')}</h2>
+            {jobs.length ? (
+              jobs.slice(0, 8).map((j) => (
+                <p className="history" key={j.id}>
+                  {j.filename || j.id} · {j.status}{' '}
+                  {j.status === 'completed' && (
+                    <>
+                      <button
+                        className="download-link"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          try {
+                            await downloadWithAuth('video', j.id);
+                          } catch {
+                            X(en ? 'Download failed.' : t('processing_failed'));
+                          }
+                        }}
+                      >
+                        {t('download_history')}
+                      </button>
+                      <button
+                        className="view-btn"
+                        onClick={() => {
+                          J(j);
+                          if (j.segments) Q(j.segments);
+                          setActiveTab('workspace');
+                          window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
+                      >
+                        {t('view_result_btn')}
+                      </button>
+                    </>
+                  )}
+                </p>
+              ))
+            ) : (
+              <p>{t('history_empty')}</p>
+            )}
+          </section>
+        )}
+
+        {/* ── Settings & Architecture Info Tab ────────────────────────────── */}
+        {activeTab === 'settings' && (
+          <section className="card card-full">
+            <h2>{t('nav_settings')}</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+              <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: '#10b981' }}>🤖 AI Pipeline Models</h4>
+                <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', color: '#94a3b8', lineHeight: '1.8' }}>
+                  <li>Whisper ASR: faster-whisper small</li>
+                  <li>Translation: NLLB-200 600M (CTranslate2 int8)</li>
+                  <li>Khmer Voice: Neural Sreymom / Piseth & MMS-TTS</li>
+                  <li>Audio Muxing: FFmpeg 6+ Audio Ducking</li>
+                </ul>
+              </div>
+
+              <div style={{ background: 'rgba(255, 255, 255, 0.03)', padding: '1rem', borderRadius: '12px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: '#10b981' }}>🔒 Privacy & Data Retention</h4>
+                <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', color: '#94a3b8', lineHeight: '1.8' }}>
+                  <li>Local on-device inference</li>
+                  <li>24-hour automatic TTL cleanup</li>
+                  <li>Cross-user isolation with HttpOnly sessions</li>
+                  <li>60 min / day processing quota per account</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
+
+      <footer>
+        Local processing · Upload content you have permission to use · Files deleted after 24 h.
+      </footer>
+    </div>
   );
 }

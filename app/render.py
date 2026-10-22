@@ -7,7 +7,7 @@ from app.providers import synthesize_khmer
 from app.audio_quality import require_real_speech
 from app.segments import Segment,is_khmer_text,write_srt,write_vtt
 from app.storage import get_job, update_job
-from app.pipeline import run
+from app.pipeline import run, probe
 import shutil
 FFMPEG=os.getenv("FFMPEG","ffmpeg"); FFPROBE=os.getenv("FFPROBE","ffprobe")
 def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:float,opts:dict[str,Any],transcript:Any,providers:list[str],video_stream:dict[str,Any],started:float,counters:dict[str,Any]|None=None,stage_times:dict[str,float]|None=None)->None:
@@ -119,4 +119,11 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
   path=str(root/"subtitles.srt").replace("\\","/").replace(":","\\:").replace("'","\\'"); args += ["-vf",f"subtitles='{path}':force_style='FontName=Khmer OS,FontSize=24,Outline=2,Shadow=1,MarginV=30'"]
  run(args+[str(video)])
  stg["mux"] = round(time.time() - t_mux, 3)
- update_job(job_id,status="completed",stage="done",progress=100,outputs={"video":video.name,"audio":audio.name,"srt":"subtitles.srt","vtt":"subtitles.vtt","json":"transcript.json"},detected_language=transcript.language,providers={"translation":sorted(set(providers)),"tts":sorted(set(tts))},segments=[s.__dict__ for s in segments],timings={"segment_durations":speech,"processing_seconds":round(time.time()-started,2),"fit_stats":fit_stats,"counters":ctr,"stage_times":stg})
+ if not video.exists() or video.stat().st_size == 0:
+  raise RuntimeError(f"Final dubbed video was not generated or is empty: {video.name}")
+ v_meta = probe(video)
+ if not any(s["codec_type"] == "video" for s in v_meta.get("streams", [])):
+  raise RuntimeError("Final dubbed video is missing video stream")
+ if not any(s["codec_type"] == "audio" for s in v_meta.get("streams", [])):
+  raise RuntimeError("Final dubbed video is missing audio stream")
+ update_job(job_id,status="completed",stage="done",progress=100,output_url=str(video),outputs={"video":video.name,"audio":audio.name,"srt":"subtitles.srt","vtt":"subtitles.vtt","json":"transcript.json"},detected_language=transcript.language,providers={"translation":sorted(set(providers)),"tts":sorted(set(tts))},segments=[s.__dict__ for s in segments],timings={"segment_durations":speech,"processing_seconds":round(time.time()-started,2),"fit_stats":fit_stats,"counters":ctr,"stage_times":stg})

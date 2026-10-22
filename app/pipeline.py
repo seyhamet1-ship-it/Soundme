@@ -178,4 +178,5 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
    return
   log.exception("job %s failed",job_id); payload=failure_error(exc)
   if 'segments' in locals(): payload['segments']=[s.__dict__ for s in segments]
-  update_job(job_id,status="failed",stage="failed",progress=100,error={k:v for k,v in payload.items() if k!='segments'},segments=[s.__dict__ for s in segments] if 'segments' in locals() else None)
+  fail_prog = min((get_job(job_id) or {}).get("progress", 0), 99)
+  update_job(job_id,status="failed",stage="failed",progress=fail_prog,error={k:v for k,v in payload.items() if k!='segments'},segments=[s.__dict__ for s in segments] if 'segments' in locals() else None)

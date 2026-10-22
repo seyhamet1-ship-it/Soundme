@@ -10,7 +10,7 @@ python-dotenv==1.1.1
 deep-translator==1.11.4
 transformers==4.46.3
 torch==2.5.1
-sentencepiece==0.2.3
+sentencepiece==0.2.2  # 0.2.3 does not exist on PyPI; 0.2.2 is the latest 0.2.x
 ctranslate2>=4.5.0
 azure-cognitiveservices-speech>=1.40.0
 psutil>=5.9.0
