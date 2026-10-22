@@ -224,3 +224,5 @@ To verify full 30-minute dubbing on your host machine:
 
 3. **បើកប្រើប្រាស់:**
    ចូលទៅកាន់ `http://localhost:5173`។ ជ្រើសរើសសំឡេងខ្មែរ (ស្រីមុំ ឬ ពិសិដ្ឋ) ហើយចុច "ចាប់ផ្ដើមបញ្ចូលសំឡេង"។
+#   S o u n d m e  
+ 
