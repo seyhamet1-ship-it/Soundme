@@ -5,6 +5,11 @@ const A = '/api';
 
 // ── Auth token management ──────────────────────────────────────────────────
 function getToken() {
+  // Desktop-local mode: never use a token inside the Electron desktop shell.
+  if (typeof window !== 'undefined' && window.soundmeDesktop?.isDesktop) {
+    try { localStorage.removeItem('soundme_token'); } catch (_) {}
+    return '';
+  }
   try {
     const params = new URLSearchParams(window.location?.search || '');
     const urlToken = params.get('token');
@@ -23,7 +28,8 @@ function getToken() {
 let TOKEN = getToken();
 
 function authHeaders(extra = {}) {
-  if (TOKEN) return { Authorization: `Bearer ${TOKEN}`, 'X-Access-Token': TOKEN, ...extra };
+  const isDesktop = typeof window !== 'undefined' && window.soundmeDesktop?.isDesktop;
+  if (TOKEN && !isDesktop) return { Authorization: `Bearer ${TOKEN}`, 'X-Access-Token': TOKEN, ...extra };
   return extra;
 }
 
@@ -124,9 +130,12 @@ export default function App() {
   const [submitting, setSubmitting] = useState(false);
   const [pendingUpload] = useState(() => localStorage.getItem('pendingUploadId'));
   const [userSession, setUserSession] = useState(null);
-  const [noToken, setNoToken] = useState(() => !TOKEN);
+  // Desktop-local mode: treat as always authenticated (noToken starts false).
+  // The /auth/me probe below also sets noToken=false when backend confirms desktop:local.
+  const [noToken, setNoToken] = useState(false);
   const [videoBlobUrls, setVideoBlobUrls] = useState({});
-  const [tokenInput, setTokenInput] = useState('');
+  const [maxUploadMb, setMaxUploadMb] = useState(() => Number(import.meta.env.VITE_MAX_UPLOAD_SIZE_MB || 2048));
+  const maxUploadBytes = maxUploadMb * 1024 * 1024;
 
   const t = (key) => strings[key]?.[en ? 'en' : 'km'] || key;
 
@@ -163,14 +172,17 @@ export default function App() {
         }
       })
       .catch(() => {});
+
+    fetch('/api/health')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d && d.max_upload_mb) setMaxUploadMb(d.max_upload_mb);
+      })
+      .catch(() => {});
   }, [en]);
 
   function submitToken() {
-    const v = tokenInput.trim();
-    if (!v) return;
-    TOKEN = v;
-    localStorage.setItem('soundme_token', v);
-    setNoToken(false);
+    // No-op in desktop-local mode. Kept so existing test references don't break.
   }
 
   // ── Load active job and history on mount ───────────────────────────────────
@@ -180,7 +192,14 @@ export default function App() {
       J({ id });
     }
     authFetch(A + '/jobs')
-      .then((r) => r.json())
+      .then(async (r) => {
+        if (r.status === 401) {
+          // In desktop-local mode the backend never returns 401 for loopback requests.
+          // For web mode: silently return empty jobs rather than forcing a login screen.
+          return [];
+        }
+        return r.json();
+      })
       .then((data) => {
         if (Array.isArray(data)) {
           H(data);
@@ -234,9 +253,29 @@ export default function App() {
 
     const poll = () =>
       authFetch(`${A}/jobs/${job.id}`)
-        .then((r) => r.json())
-        .then(applyJob)
-        .catch(() => {});
+        .then((r) => {
+          const status = r && typeof r.status === 'number' ? r.status : undefined;
+          if (status === 404) {
+            // Job no longer exists (e.g. TTL cleanup or server restart).
+            // Stop the endless loading/polling loop instead of silently ignoring it.
+            if (localStorage.getItem('activeJob') === job.id) {
+              localStorage.removeItem('activeJob');
+            }
+            if (live) J(null);
+            return null;
+          }
+          if (status !== undefined && status >= 400) {
+            throw new Error(`HTTP ${status}`);
+          }
+          if (r && r.ok === false && status === undefined) {
+            throw new Error('Request failed');
+          }
+          return r.json().catch(() => { throw new Error('Invalid JSON response'); });
+        })
+        .then((d) => { if (d) applyJob(d); })
+        .catch((e) => {
+          if (live && e?.message) X(e.message);
+        });
 
     const startPolling = () => {
       if (timer || !live || finished) return;
@@ -316,10 +355,10 @@ export default function App() {
       X(en ? 'Choose an MP4, MOV, MKV, AVI, or WEBM video.' : (t('invalid_video') + ' (Choose an MP4, MOV, MKV, AVI, or WEBM video.)'));
       return;
     }
-    if (f.size > 500 * 1024 * 1024) {
+    if (f.size > maxUploadBytes) {
       let actualMb = (f.size / (1024 * 1024)).toFixed(1);
-      let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ 500 MB។`;
-      let enMsg = `File size (${actualMb} MB) exceeds the 500 MB limit.`;
+      let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ ${maxUploadMb} MB។`;
+      let enMsg = `File size (${actualMb} MB) exceeds the ${maxUploadMb} MB limit.`;
       X(`${kmMsg} (${enMsg})`);
       return;
     }
@@ -408,15 +447,13 @@ export default function App() {
 
   function upload() {
     if (submitting) return;
-    if (noToken && !userSession?.authenticated) {
-      X(en ? 'Please sign in with Google or enter an access code first.' : 'សូមចូលដោយប្រើ Google ឬបញ្ចូលលេខកូដចូលជាមុនសិន។');
-      return;
-    }
+    // Desktop-local mode: always proceed (noToken is always false).
+    // Web mode: the /auth/me probe ensures noToken is false when authenticated.
     if (!file || file.size === 0) { X(t('file_empty')); return; }
-    if (file.size > 500 * 1024 * 1024) {
+    if (file.size > maxUploadBytes) {
       let actualMb = (file.size / (1024 * 1024)).toFixed(1);
-      let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ 500 MB។`;
-      let enMsg = `File size (${actualMb} MB) exceeds the 500 MB limit.`;
+      let kmMsg = `ទំហំឯកសារ ${actualMb} MB លើសពីកម្រិតកំណត់ ${maxUploadMb} MB។`;
+      let enMsg = `File size (${actualMb} MB) exceeds the ${maxUploadMb} MB limit.`;
       X(`${kmMsg} (${enMsg})`);
       return;
     }
@@ -434,7 +471,9 @@ export default function App() {
     x.open('POST', A + '/jobs');
     x.withCredentials = true;
     x.setRequestHeader('Idempotency-Key', idempotencyKey);
-    if (TOKEN) x.setRequestHeader('Authorization', `Bearer ${TOKEN}`);
+    if (TOKEN && !(typeof window !== 'undefined' && window.soundmeDesktop?.isDesktop)) {
+      x.setRequestHeader('Authorization', `Bearer ${TOKEN}`);
+    }
     x.upload.onprogress = (e) => e.lengthComputable && P(Math.round((e.loaded / e.total) * 100));
     x.onload = () => {
       setSubmitting(false);
@@ -539,39 +578,9 @@ export default function App() {
             <span className="user-badge" title={userSession.google_email}>
               👤 {userSession.google_email}
             </span>
-          ) : (
-            <a
-              href="/auth/google"
-              className="google-nav-btn"
-              style={{
-                textDecoration: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                color: '#f8fafc',
-                background: 'rgba(255, 255, 255, 0.08)',
-                padding: '0.4rem 0.8rem',
-                borderRadius: '8px',
-                fontSize: '0.825rem',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <span>{en ? 'Continue with Google' : 'ចូលដោយប្រើ Google'}</span>
-            </a>
-          )}
+          ) : null}
 
           <button className="lang-btn" onClick={() => E(!en)}>{en ? 'ខ្មែរ' : 'EN'}</button>
-          {(!noToken || userSession?.authenticated) && (
-            <button className="signout-btn" onClick={logout} title={en ? 'Sign out' : 'ចាកចេញ'}>
-              {en ? 'Sign out' : 'ចាកចេញ'}
-            </button>
-          )}
         </div>
       </nav>
 
@@ -585,51 +594,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* ── Prominent Google Login Banner (when not authenticated) ──── */}
-        {noToken && !userSession?.authenticated && (
-          <section className="login-banner card card-full" style={{ marginBottom: '1.5rem', background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.95))', borderColor: 'rgba(99, 102, 241, 0.25)' }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '1.25rem' }}>
-              <div>
-                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.15rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span>🔐</span> {en ? 'Sign in to Soundme AI' : 'ចូលប្រើប្រាស់ Soundme AI'}
-                </h3>
-                <p style={{ margin: 0, fontSize: '0.875rem', color: '#94a3b8' }}>
-                  {en
-                    ? 'Private access. Continue with Google or enter your access code.'
-                    : 'សេវាកម្មឯកជន។ សូមបន្តជាមួយ Google ឬបញ្ចូលលេខកូដចូល។'}
-                </p>
-              </div>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.75rem' }}>
-                <a href="/auth/google" className="google-login-btn" style={{ padding: '0.65rem 1.25rem', fontSize: '0.9rem' }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                  <span>{en ? 'Continue with Google' : 'បន្តជាមួយ Google'}</span>
-                </a>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="password"
-                    className="login-input"
-                    placeholder={en ? 'Access code' : 'លេខកូដចូល'}
-                    value={tokenInput}
-                    onChange={(e) => setTokenInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && submitToken()}
-                    style={{ width: '150px', padding: '0.6rem 0.75rem', fontSize: '0.85rem' }}
-                  />
-                  <button className="primary" onClick={submitToken} style={{ padding: '0.6rem 1rem', fontSize: '0.85rem' }}>
-                    {en ? 'Enter' : 'ចូល'}
-                  </button>
-                </div>
-              </div>
-            </div>
-            {err && <p className="error" style={{ marginTop: '0.75rem' }}>{err}</p>}
-          </section>
-        )}
+        {/* Login banner removed: desktop-local mode authenticates automatically via /auth/me. */}
 
         {activeTab === 'workspace' && (
           <>
@@ -652,7 +617,7 @@ export default function App() {
                   <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
                   <b>＋</b>
                   <strong>{file?.name || t('upload_heading')}</strong>
-                  <span>MP4 · MOV · MKV · WEBM · 500 MB max</span>
+                  <span>MP4 · MOV · MKV · WEBM · {maxUploadMb} MB max</span>
                 </label>
 
                 {file && file.size > 0 && typeof URL.createObjectURL === 'function' && (
@@ -774,15 +739,30 @@ export default function App() {
             {job?.status === 'awaiting_review' && (
               <section className="card card-full">
                 <h2>{t('review_heading')}</h2>
-                {rows.map((r, i) => (
-                  <label className="review" key={r.id}>
-                    <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>{r.start.toFixed(1)}s · {r.source_text}</span>
-                    <textarea
-                      value={r.text_km}
-                      onChange={(e) => Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))}
-                    />
-                  </label>
-                ))}
+                {job?.error?.message_en && (
+                  <div className="alert alert-warning" style={{ margin: '0.5rem 0 1rem', padding: '0.75rem', background: '#2d1800', border: '1px solid #f59e0b', borderRadius: '8px', color: '#fef3c7' }}>
+                    <strong>{en ? 'Timing Review:' : 'ការពិនិត្យពេលវេលា៖'}</strong> {en ? job.error.message_en : (job.error.message_km || job.error.message_en)}
+                  </div>
+                )}
+                {rows.map((r, i) => {
+                  const stat = (job?.timing_review?.fit_stats || []).find((s) => s.segment_id === r.id);
+                  return (
+                    <label className="review" key={r.id}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>{r.start.toFixed(1)}s – {r.end.toFixed(1)}s · {r.source_text}</span>
+                        {stat && (
+                          <span style={{ fontSize: '0.75rem', color: stat.review_required ? '#f87171' : '#38bdf8', background: stat.review_required ? 'rgba(239, 68, 68, 0.15)' : 'rgba(56, 189, 248, 0.15)', padding: '2px 8px', borderRadius: '4px' }}>
+                            {en ? `Slot: ${stat.target_duration.toFixed(2)}s | Audio: ${stat.raw_duration.toFixed(2)}s | ${stat.recovery_action || (stat.review_required ? 'Review' : 'OK')}` : `ពេលដើម: ${stat.target_duration.toFixed(2)}s | សំឡេង: ${stat.raw_duration.toFixed(2)}s`}
+                          </span>
+                        )}
+                      </div>
+                      <textarea
+                        value={r.text_km}
+                        onChange={(e) => Q(rows.map((x, n) => (n === i ? { ...x, text_km: e.target.value } : x)))}
+                      />
+                    </label>
+                  );
+                })}
                 <button className="primary" onClick={save} style={{ marginTop: '1rem' }}>
                   {t('save_and_continue')}
                 </button>

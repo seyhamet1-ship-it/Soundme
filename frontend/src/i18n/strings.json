@@ -112,8 +112,8 @@
     "en": "File is empty. Please choose a valid video."
   },
   "upload_too_large": {
-    "km": "ទំហំឯកសារលើសពីកម្រិតកំណត់ 4096 MB។",
-    "en": "File exceeds the 4096 MB upload limit."
+    "km": "ទំហំឯកសារលើសពីកម្រិតកំណត់។",
+    "en": "File exceeds the maximum upload limit."
   },
   "invalid_video": {
     "km": "ទ្រង់ទ្រាយវីដេអូមិនត្រឹមត្រូវ ឬខូច។",

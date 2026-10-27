@@ -39,7 +39,7 @@ export default function UploadDropzone({ file, onFileSelect, onDrop }) {
 
         <div className="text-lg font-semibold text-white">Drop a video here or click to browse</div>
         <div className="mt-2 text-sm text-slate-400">
-          Supported: {supportedFormats.join(', ')} • Max 500 MB / 30 min
+          Supported: {supportedFormats.join(', ')} • Max 2048 MB
         </div>
 
         {file && (

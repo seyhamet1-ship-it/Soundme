@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-10-21T03:49:54Z",
+  "generated_utc": "2026-10-21T13:00:35Z",
   "live": false,
   "full": false,
   "checks": [
@@ -7,43 +7,43 @@
       "name": "compile-app",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 0.4,
+      "elapsed_s": 0.7,
       "output_tail": ""
     },
     {
       "name": "pytest",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 30.0,
-      "output_tail": "...........................s................................s........... [ 80%]\n.......sssss......                                                       [100%]\n83 passed, 7 skipped in 27.59s\n"
+      "elapsed_s": 43.0,
+      "output_tail": "........................................................s............... [ 80%]\n..................                                                       [100%]\n89 passed, 1 skipped in 40.00s\n"
     },
     {
       "name": "mypy",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 15.7,
+      "elapsed_s": 26.1,
       "output_tail": ""
     },
     {
       "name": "frontend-tests",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 31.1,
-      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 test\n> vitest run\n\n\n\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mG:/My Drive/Soundme/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/App.test.jsx \u001b[2m(\u001b[22m\u001b[2m5 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[90m 234\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m5 passed\u001b[39m\u001b[22m\u001b[90m (5)\u001b[39m\n\u001b[2m   Start at \u001b[22m 10:48:38\n\u001b[2m   Duration \u001b[22m 27.01s\u001b[2m (transform 176ms, setup 0ms, collect 3.70s, tests 234ms, environment 12.72s, prepare 1.12s)\u001b[22m\n\n"
+      "elapsed_s": 48.1,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 test\n> vitest run\n\n\n\u001b[1m\u001b[7m\u001b[36m RUN \u001b[39m\u001b[27m\u001b[22m \u001b[36mv2.1.9 \u001b[39m\u001b[90mG:/My Drive/Soundme/frontend\u001b[39m\n\n \u001b[32m✓\u001b[39m src/App.test.jsx \u001b[2m(\u001b[22m\u001b[2m10 tests\u001b[22m\u001b[2m)\u001b[22m\u001b[33m 9807\u001b[2mms\u001b[22m\u001b[39m\n   \u001b[33m\u001b[2m✓\u001b[22m\u001b[39m job status streaming\u001b[2m > \u001b[22mstops polling once the job reaches a terminal status \u001b[33m4075\u001b[2mms\u001b[22m\u001b[39m\n   \u001b[33m\u001b[2m✓\u001b[22m\u001b[39m job status streaming\u001b[2m > \u001b[22missues a single status poll and a single history fetch once the job is done \u001b[33m5098\u001b[2mms\u001b[22m\u001b[39m\n\n\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m\n\u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m10 passed\u001b[39m\u001b[22m\u001b[90m (10)\u001b[39m\n\u001b[2m   Start at \u001b[22m 19:58:57\n\u001b[2m   Duration \u001b[22m 43.25s\u001b[2m (transform 280ms, setup 0ms, collect 4.84s, tests 9.81s, environment 15.63s, prepare 1.30s)\u001b[22m\n\n"
     },
     {
       "name": "frontend-lint",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 7.6,
+      "elapsed_s": 9.0,
       "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 lint\n> eslint src/App.jsx src/App.test.jsx src/main.jsx\n\n"
     },
     {
       "name": "frontend-build",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 13.1,
-      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 build\n> vite build\n\n\u001b[36mvite v5.4.21 \u001b[32mbuilding for production...\u001b[36m\u001b[39m\ntransforming...\n\u001b[32m✓\u001b[39m 37 modules transformed.\nrendering chunks...\ncomputing gzip size...\n\u001b[2mdist/\u001b[22m\u001b[32mindex.html                                                  \u001b[39m\u001b[1m\u001b[2m  0.55 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  0.35 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-DodaIRJA.woff2  \u001b[39m\u001b[1m\u001b[2m  6.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-D0NTkDRW.woff2  \u001b[39m\u001b[1m\u001b[2m  6.55 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-Bd3ZAoRX.woff   \u001b[39m\u001b[1m\u001b[2m  8.43 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-DTINSare.woff   \u001b[39m\u001b[1m\u001b[2m  8.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-BLI6HyUZ.woff2      \u001b[39m\u001b[1m\u001b[2m 10.62 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DuGo6TL7.woff2      \u001b[39m\u001b[1m\u001b[2m 10.76 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-Dek0CCYB.woff       \u001b[39m\u001b[1m\u001b[2m 13.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DlNc-L-D.woff       \u001b[39m\u001b[1m\u001b[2m 13.59 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-DnqNet9s.woff2      \u001b[39m\u001b[1m\u001b[2m 22.94 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-qwjLDidk.woff2      \u001b[39m\u001b[1m\u001b[2m 24.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-CfhpqDv8.woff       \u001b[39m\u001b[1m\u001b[2m 30.32 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-BUdGgDYy.woff       \u001b[39m\u001b[1m\u001b[2m 32.40 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[35massets/index-D11mGGFZ.css                                   \u001b[39m\u001b[1m\u001b[2m 17.56 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  4.69 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[36massets/index-BueFsK25.js                                    \u001b[39m\u001b[1m\u001b[2m242.13 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip: 76.83 kB\u001b[22m\n\u001b[32m✓ built in 10.71s\u001b[39m\n"
+      "elapsed_s": 13.2,
+      "output_tail": "\n> video-dubbing-studio-frontend@1.0.0 build\n> vite build\n\n\u001b[36mvite v5.4.21 \u001b[32mbuilding for production...\u001b[36m\u001b[39m\ntransforming...\n\u001b[32m✓\u001b[39m 37 modules transformed.\nrendering chunks...\ncomputing gzip size...\n\u001b[2mdist/\u001b[22m\u001b[32mindex.html                                                  \u001b[39m\u001b[1m\u001b[2m  0.55 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  0.35 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-DodaIRJA.woff2  \u001b[39m\u001b[1m\u001b[2m  6.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-D0NTkDRW.woff2  \u001b[39m\u001b[1m\u001b[2m  6.55 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-400-normal-Bd3ZAoRX.woff   \u001b[39m\u001b[1m\u001b[2m  8.43 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-ext-700-normal-DTINSare.woff   \u001b[39m\u001b[1m\u001b[2m  8.50 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-BLI6HyUZ.woff2      \u001b[39m\u001b[1m\u001b[2m 10.62 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DuGo6TL7.woff2      \u001b[39m\u001b[1m\u001b[2m 10.76 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-400-normal-Dek0CCYB.woff       \u001b[39m\u001b[1m\u001b[2m 13.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-latin-700-normal-DlNc-L-D.woff       \u001b[39m\u001b[1m\u001b[2m 13.59 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-DnqNet9s.woff2      \u001b[39m\u001b[1m\u001b[2m 22.94 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-qwjLDidk.woff2      \u001b[39m\u001b[1m\u001b[2m 24.54 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-400-normal-CfhpqDv8.woff       \u001b[39m\u001b[1m\u001b[2m 30.32 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[32massets/noto-sans-khmer-khmer-700-normal-BUdGgDYy.woff       \u001b[39m\u001b[1m\u001b[2m 32.40 kB\u001b[22m\u001b[1m\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[35massets/index-CgfUPWAI.css                                   \u001b[39m\u001b[1m\u001b[2m 27.22 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip:  6.52 kB\u001b[22m\n\u001b[2mdist/\u001b[22m\u001b[36massets/index-CRiaGIWt.js                                    \u001b[39m\u001b[1m\u001b[2m250.76 kB\u001b[22m\u001b[1m\u001b[22m\u001b[2m │ gzip: 79.68 kB\u001b[22m\n\u001b[32m✓ built in 10.76s\u001b[39m\n"
     },
     {
       "name": "probe-edge-artifact-real-speech",
@@ -88,7 +88,7 @@
     {
       "name": "frontend-strings-json",
       "ok": true,
-      "evidence": "strings.json size=6826"
+      "evidence": "strings.json size=9314"
     },
     {
       "name": "khmer-strings-review-md",
@@ -179,15 +179,15 @@
       "name": "idempotency-unit",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 4.2,
-      "output_tail": "...                                                                      [100%]\n3 passed in 1.86s\n"
+      "elapsed_s": 4.4,
+      "output_tail": "...                                                                      [100%]\n3 passed in 2.03s\n"
     },
     {
       "name": "server-restart-unit",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 2.7,
-      "output_tail": ".                                                                        [100%]\n1 passed in 0.39s\n"
+      "elapsed_s": 2.6,
+      "output_tail": ".                                                                        [100%]\n1 passed in 0.42s\n"
     },
     {
       "name": "phase8-item1-real-resume",
@@ -208,15 +208,15 @@
       "name": "phase9-auth-security",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 9.6,
-      "output_tail": "......................                                                   [100%]\n22 passed in 7.29s\n"
+      "elapsed_s": 11.4,
+      "output_tail": "......................                                                   [100%]\n22 passed in 9.05s\n"
     },
     {
       "name": "phase10-google-auth",
       "ok": true,
       "returncode": 0,
-      "elapsed_s": 6.8,
-      "output_tail": ".............................                                            [100%]\n29 passed in 4.42s\n"
+      "elapsed_s": 7.0,
+      "output_tail": "............................s                                            [100%]\n28 passed, 1 skipped in 4.69s\n"
     },
     {
       "name": "phase9-no-secrets",
