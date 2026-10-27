@@ -3,7 +3,7 @@ import json,logging,os,subprocess,time
 from pathlib import Path
 from typing import Any
 from app.providers import WhisperASR,translate_khmer
-from app.segments import Segment,normalize_numbers,write_srt,write_vtt
+from app.segments import Segment,merge_segments,normalize_numbers,write_srt,write_vtt
 from app.storage import get_job, update_job
 import shutil
 log=logging.getLogger("dubber.pipeline")
@@ -32,7 +32,7 @@ def probe(path:Path)->dict[str,Any]:
  duration=float(data.get("format",{}).get("duration",0))
  from app.config import MAX_VIDEO_SECONDS, MAX_UPLOAD_BYTES
  if duration<=0: raise ValueError("Video duration is invalid (0 or negative).")
- if duration>MAX_VIDEO_SECONDS:
+ if MAX_VIDEO_SECONDS > 0 and duration>MAX_VIDEO_SECONDS:
   from app.i18n import get_km
   actual_min=round(duration/60,1)
   max_min=MAX_VIDEO_SECONDS//60
@@ -56,8 +56,8 @@ def failure_error(exc:BaseException)->dict[str,Any]:
  message=str(exc)[:500]; lower=message.lower()
  if message.startswith("TTS_UNAVAILABLE"): return {"code":"TTS_UNAVAILABLE","message_en":message,"message_km":get_km("tts_unavailable")}
  if "TTS_EMPTY_TEXT" in message: return {"code":"TTS_EMPTY_TEXT","message_en":message,"message_km":get_km("tts_empty_text")}
- if "duration" in lower or "30-minute" in lower: return {"code":"DURATION_TOO_LONG","message_en":message,"message_km":get_km("duration_too_long")}
- if "upload limit" in lower or "500 mb" in lower or "upload_too_large" in lower: return {"code":"UPLOAD_TOO_LARGE","message_en":message,"message_km":get_km("upload_too_large")}
+ if "duration" in lower or "minute" in lower or "duration_too_long" in lower: return {"code":"DURATION_TOO_LONG","message_en":message,"message_km":get_km("duration_too_long")}
+ if "upload limit" in lower or "500 mb" in lower or "upload_too_large" in lower or ("exceeds" in lower and "mb limit" in lower): return {"code":"UPLOAD_TOO_LARGE","message_en":message,"message_km":get_km("upload_too_large")}
  if "no audio track" in lower: return {"code":"NO_AUDIO_TRACK","message_en":message,"message_km":get_km("no_audio_track")}
  if "no speech was detected" in lower or "no speech detected" in lower: return {"code":"NO_SPEECH_DETECTED","message_en":message,"message_km":get_km("no_speech_detected")}
  if "no video stream" in lower: return {"code":"NO_VIDEO_STREAM","message_en":message,"message_km":get_km("no_video_stream")}
@@ -126,7 +126,9 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
     "segments": [{"start": float(s.start), "end": float(s.end), "text": str(s.text).strip()} for s in transcript.segments]
    }, ensure_ascii=False, indent=2), encoding="utf-8")
   stage_times["asr"] = round(time.time() - t_asr, 3)
-  segments=[Segment(i+1,float(s.start),float(s.end),str(s.text).strip()) for i,s in enumerate(transcript.segments) if str(s.text).strip()]
+  # Keep ASR timestamps authoritative, merging only contiguous unfinished
+  # sentence fragments.  Translation and rendering share this exact list.
+  segments=merge_segments(transcript.segments)
   if not segments: raise ValueError("No speech was detected. Try a video with audible speech.")
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
@@ -143,7 +145,7 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
   missing_texts = []
   for idx, s in enumerate(segments):
    key = str(s.id)
-   if key in saved_trans and saved_trans[key].get("text_km"):
+   if key in saved_trans and saved_trans[key].get("text_km") and saved_trans[key].get("source") == s.source_text:
     s.text_km = normalize_numbers(saved_trans[key]["text_km"])
     providers.append(saved_trans[key].get("provider", "nllb-checkpoint"))
     counters["translate_skipped"] += 1
@@ -154,13 +156,23 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
   counters["translate_total"] = len(segments)
   if missing_texts:
    from app.providers import translate_khmer_batch
-   trans_batch, p = translate_khmer_batch(missing_texts, transcript.language)
-   counters["translate_computed"] = len(trans_batch)
-   for idx, km in zip(missing_indices, trans_batch):
-    segments[idx].text_km = normalize_numbers(km)
-    providers[idx] = p
-    saved_trans[str(segments[idx].id)] = {"text_km": segments[idx].text_km, "provider": p, "source": segments[idx].source_text}
-   trans_ckpt.write_text(json.dumps(saved_trans, ensure_ascii=False, indent=2), encoding="utf-8")
+   BATCH_SIZE = 25
+   p_last = "nllb"
+   for b_start in range(0, len(missing_texts), BATCH_SIZE):
+    if (get_job(job_id) or {}).get("status") == "canceled":
+     if root.exists(): shutil.rmtree(root, ignore_errors=True)
+     return
+    b_texts = missing_texts[b_start:b_start + BATCH_SIZE]
+    b_indices = missing_indices[b_start:b_start + BATCH_SIZE]
+    trans_sub, p_last = translate_khmer_batch(b_texts, transcript.language)
+    counters["translate_computed"] += len(trans_sub)
+    for idx, km in zip(b_indices, trans_sub):
+     segments[idx].text_km = normalize_numbers(km)
+     providers[idx] = p_last
+     saved_trans[str(segments[idx].id)] = {"text_km": segments[idx].text_km, "provider": p_last, "source": segments[idx].source_text}
+    trans_ckpt.write_text(json.dumps(saved_trans, ensure_ascii=False, indent=2), encoding="utf-8")
+    cur_p = 38 + int(((b_start + len(b_texts)) / len(missing_texts)) * 12)
+    update_job(job_id, stage="translate", progress=min(50, cur_p), segments=[s.__dict__ for s in segments])
   else:
    counters["translate_computed"] = 0
    log.info("Job %s: Translation checkpoint hit; skipped %d segments", job_id, len(segments))

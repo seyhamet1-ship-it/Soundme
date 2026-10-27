@@ -58,10 +58,17 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "500"))
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB") or os.getenv("MAX_UPLOAD_MB", "500"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-MAX_VIDEO_SECONDS = int(os.getenv("MAX_DURATION_MIN", "30")) * 60
+MAX_DURATION_MIN = int(os.getenv("MAX_DURATION_MIN", "10"))
+MAX_VIDEO_SECONDS = MAX_DURATION_MIN * 60 if MAX_DURATION_MIN > 0 else 0
 SUPPORTED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
+
+# Configurable timing policy and recovery thresholds
+TIMING_PREFERRED_TEMPO_MAX = float(os.getenv("TIMING_PREFERRED_TEMPO_MAX", "1.25"))
+TIMING_MAX_TEMPO = float(os.getenv("TIMING_MAX_TEMPO", "2.0"))
+TIMING_MAX_GAP_BORROW = float(os.getenv("TIMING_MAX_GAP_BORROW", "0.85"))
+TIMING_MIN_BREATH_PAUSE = float(os.getenv("TIMING_MIN_BREATH_PAUSE", "0.15"))
 
 
 def _bool_env(name: str, default: bool = False) -> bool:

@@ -23,3 +23,5 @@ tests/fault_work_1min/
 tools/models/
 tests/scratch/
 *.log
+release/
+desktop_data/

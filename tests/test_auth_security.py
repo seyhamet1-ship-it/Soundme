@@ -49,6 +49,8 @@ def _fake_probe(path):
 
 def test_unauthenticated_jobs_returns_401(monkeypatch, tmp_path):
     monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    # Ensure desktop-local mode is NOT active so we test actual auth enforcement.
+    monkeypatch.delenv("DESKTOP_LOCAL_MODE", raising=False)
     with TestClient(app) as client:
         r = client.get("/api/jobs")
         assert r.status_code == 401, r.text
@@ -57,16 +59,25 @@ def test_unauthenticated_jobs_returns_401(monkeypatch, tmp_path):
 
 def test_unauthenticated_upload_returns_401(monkeypatch, tmp_path):
     monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    # Ensure desktop-local mode is NOT active so we test actual auth enforcement.
+    monkeypatch.delenv("DESKTOP_LOCAL_MODE", raising=False)
     with TestClient(app) as client:
         r = client.post("/api/jobs", files={"file": ("test.mp4", b"fake", "video/mp4")})
         assert r.status_code == 401
 
 
-def test_unauthenticated_voices_returns_401(monkeypatch, tmp_path):
+def test_unauthenticated_voices_returns_200(monkeypatch, tmp_path):
+    """/api/voices is intentionally public — no token required.
+
+    The voices list is static metadata; there is nothing user-specific to protect.
+    This test confirms the endpoint is reachable without credentials.
+    """
     monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
     with TestClient(app) as client:
         r = client.get("/api/voices")
-        assert r.status_code == 401
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert isinstance(data, list) and len(data) > 0
 
 
 # ── 2. Wrong token → 401 ──────────────────────────────────────────────────────

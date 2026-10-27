@@ -112,3 +112,54 @@ def test_failure_error_preserves_tts_unavailable_code():
     assert "TTS_UNAVAILABLE" in payload["message_en"]
     assert payload["message_km"]
     assert failure_error(ValueError("no speech"))["code"] == "PROCESSING_FAILED"
+
+
+def test_review_resume_uses_edited_segments_and_clears_diagnostics(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"synthetic")
+    storage.set_job("review-job", {
+        "id": "review-job", "status": "awaiting_review", "stage": "timing_review", "progress": 54,
+        "owner_token": TOKEN, "source_path": str(source), "detected_language": "en",
+        "options": {}, "providers": ["manual"],
+        "segments": [{"id": 1, "start": 0.0, "end": 1.0, "source_text": "old", "text_km": "old"}],
+        "error": {"code": "TIMING_OVERFLOW_REVIEW_REQUIRED"}, "timing_review": {"code": "TIMING_OVERFLOW_REVIEW_REQUIRED"},
+    })
+    monkeypatch.setattr(api, "probe", lambda _: {"streams": [{"codec_type": "video"}], "format": {"duration": "2"}})
+    submitted = {}
+    monkeypatch.setattr(api.POOL, "submit", lambda fn, *args: submitted.update(fn=fn, args=args))
+    edited = [{"id": 1, "start": 0.0, "end": 1.0, "source_text": "old", "text_km": "edited"}]
+    with TestClient(app) as client:
+        assert client.put("/api/jobs/review-job/segments", json=edited, headers=AUTH).status_code == 200
+        assert client.post("/api/jobs/review-job/resume", headers=AUTH).json() == {"status": "running"}
+    stored = storage.get_job("review-job")
+    assert stored["status"] == "running" and stored["error"] is None and stored["timing_review"] is None
+    assert submitted["fn"] is api.resume_render_worker
+    assert submitted["args"][3][0].text_km == "edited"
+
+
+def test_review_resume_worker_records_a_render_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    storage.set_job("failed-resume", {"id": "failed-resume", "status": "running", "progress": 54, "owner_token": TOKEN})
+    monkeypatch.setattr("app.render.render", lambda *_args: (_ for _ in ()).throw(RuntimeError("render exploded")))
+    api.resume_render_worker("failed-resume")
+    stored = storage.get_job("failed-resume")
+    assert stored["status"] == "failed"
+    assert stored["error"]["code"] == "PROCESSING_FAILED"
+    assert "render exploded" in stored["error"]["message_en"]
+
+
+def test_review_resume_worker_can_reach_completed_state(monkeypatch, tmp_path):
+    monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    storage.set_job("completed-resume", {"id": "completed-resume", "status": "running", "progress": 54, "owner_token": TOKEN})
+
+    def complete(job_id, *_args):
+        storage.update_job(job_id, status="completed", stage="done", progress=100,
+                           outputs={"video": "dubbed.mp4"}, timings={"fit_stats": []})
+
+    monkeypatch.setattr("app.render.render", complete)
+    api.resume_render_worker("completed-resume")
+    stored = storage.get_job("completed-resume")
+    assert stored["status"] == "completed"
+    assert stored["stage"] == "done"
+    assert stored["outputs"]["video"] == "dubbed.mp4"

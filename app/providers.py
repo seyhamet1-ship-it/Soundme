@@ -14,6 +14,12 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
+# Force HuggingFace Hub / Transformers to use only locally cached models.
+# All models (Whisper ASR, NLLB) are cached locally — no network access needed.
+os.environ.setdefault("HF_HUB_LOCAL_FILES_ONLY", "1")
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 
 @dataclass
 class Transcript:
@@ -35,7 +41,10 @@ class WhisperASR:
         key = f"{model_name}:{device}:{compute}:{cpu_threads}"
         with WhisperASR._lock:
             if key not in WhisperASR._models:
-                WhisperASR._models[key] = WhisperModel(model_name, device=device, compute_type=compute, cpu_threads=cpu_threads)
+                WhisperASR._models[key] = WhisperModel(
+                    model_name, device=device, compute_type=compute, cpu_threads=cpu_threads,
+                    local_files_only=True,
+                )
             self.model = WhisperASR._models[key]
 
     @staticmethod
@@ -106,6 +115,13 @@ class WhisperASR:
         try:
             segments, info = self.model.transcribe(audio_input, language=language, vad_filter=True, beam_size=beam_size)
             segs = list(segments)
+            if not segs:
+                # VAD can reject music-backed vocals even when Whisper can
+                # transcribe them.  Retry once without VAD; do not change the
+                # normal VAD-first path or make this an unbounded retry loop.
+                log.info("VAD produced no ASR segments; retrying once without vad_filter")
+                segments, info = self.model.transcribe(audio_input, language=language, vad_filter=False, beam_size=beam_size)
+                segs = list(segments)
         except ValueError as exc:
             if "max() iterable argument is empty" in str(exc):
                 return Transcript([], "en", 0.0)
@@ -114,6 +130,38 @@ class WhisperASR:
             segs = list(segments)
         return Transcript(segs, info.language, float(info.language_probability))
 
+
+def _local_ct2_model_dir(source: Path) -> Path:
+    """Copy a CT2 model from a slow/virtual drive to a local cache once.
+
+    This never moves or modifies the original model files; it only creates a
+    local read cache so repeated process starts avoid Google Drive/OneDrive
+    latency.  Local sources are used directly.
+    """
+    try:
+        source = source.resolve()
+    except Exception:
+        return source
+    lowered = str(source).lower()
+    is_virtual = any(token in lowered for token in (
+        "my drive", "google drive", "onedrive", "dropbox", "cloudstorage",
+    ))
+    if not is_virtual:
+        return source
+    import shutil
+    import tempfile
+    cache_root = Path(os.getenv("LOCALAPPDATA", tempfile.gettempdir())) / "Soundme" / "models"
+    cache_dir = cache_root / source.name
+    if not (cache_dir / "model.bin").exists():
+        cache_root.mkdir(parents=True, exist_ok=True)
+        temp_dir = cache_dir.with_name(cache_dir.name + ".tmp")
+        if temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.copytree(source, temp_dir)
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        temp_dir.rename(cache_dir)
+    return cache_dir
 
 class NllbTranslator:
     _model: Any = None
@@ -125,8 +173,8 @@ class NllbTranslator:
     def __init__(self) -> None:
         model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
         with NllbTranslator._lock:
-            # Check for CT2 int8 model
-            ct2_dir = Path(__file__).resolve().parents[1] / "tools" / "models" / "nllb-200-distilled-600M-ct2-int8"
+    # Check for CT2 int8 model
+            ct2_dir = _local_ct2_model_dir(Path(__file__).resolve().parents[1] / "tools" / "models" / "nllb-200-distilled-600M-ct2-int8")
             if ct2_dir.is_dir() and (ct2_dir / "model.bin").exists() and os.getenv("USE_CT2", "1") != "0":
                 if NllbTranslator._ct2_translator is None:
                     try:
@@ -142,7 +190,7 @@ class NllbTranslator:
                 if NllbTranslator._model is None or NllbTranslator._model_id != model_id:
                     import torch
                     from transformers import AutoModelForSeq2SeqLM
-                    NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32).to("cpu")
+                    NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32, local_files_only=True).to("cpu")
                     NllbTranslator._model.eval()
                     NllbTranslator._model_id = model_id
                 self.model = NllbTranslator._model
@@ -165,25 +213,26 @@ class NllbTranslator:
                 model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
                 NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
             tokenizer = NllbTranslator._tokenizer
-            tokenizer.src_lang = source_id
+            if getattr(tokenizer, 'src_lang', None) != source_id:
+                tokenizer.src_lang = source_id
 
-        if NllbTranslator._ct2_translator is not None:
-            results_out = []
-            for i in range(0, len(texts), batch_size):
-                chunk = texts[i:i+batch_size]
-                tokenized = [tokenizer.convert_ids_to_tokens(tokenizer.encode(t)) for t in chunk]
-                res_batch = NllbTranslator._ct2_translator.translate_batch(
-                    tokenized,
-                    target_prefix=[[target_code]] * len(chunk),
-                    beam_size=1,
-                    max_decoding_length=160,
-                    no_repeat_ngram_size=3,
-                    max_batch_size=batch_size
-                )
-                for r in res_batch:
-                    clean = [t for t in r.hypotheses[0] if t not in {target_code, "</s>"}]
-                    results_out.append(tokenizer.decode(tokenizer.convert_tokens_to_ids(clean)).strip())
-            return results_out
+            if NllbTranslator._ct2_translator is not None:
+                results_out = []
+                for i in range(0, len(texts), batch_size):
+                    chunk = texts[i:i+batch_size]
+                    tokenized = [tokenizer.convert_ids_to_tokens(tokenizer.encode(t)) for t in chunk]
+                    res_batch = NllbTranslator._ct2_translator.translate_batch(
+                        tokenized,
+                        target_prefix=[[target_code]] * len(chunk),
+                        beam_size=1,
+                        max_decoding_length=160,
+                        no_repeat_ngram_size=3,
+                        max_batch_size=batch_size
+                    )
+                    for r in res_batch:
+                        clean = [t for t in r.hypotheses[0] if t not in {target_code, "</s>"}]
+                        results_out.append(tokenizer.decode(tokenizer.convert_tokens_to_ids(clean)).strip())
+                return results_out
 
         import torch
         target_id = tokenizer.convert_tokens_to_ids(target_code)
@@ -264,10 +313,18 @@ class EdgeTTSProvider:
                             await asyncio.sleep(0.3 * (attempt + 1) + random.uniform(0.05, 0.15))
                             continue
                         raise
-            subprocess.run(
-                [os.getenv("FFMPEG", "ffmpeg"), "-y", "-i", str(mp3_path), "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(destination)],
-                check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+            # Convert MP3 to 24kHz mono PCM WAV, trimming excessive trailing silence padding added by Edge-TTS
+            trim_filter = "silenceremove=stop_periods=-1:stop_duration=0.15:stop_threshold=-40dB"
+            res = subprocess.run(
+                [os.getenv("FFMPEG", "ffmpeg"), "-y", "-i", str(mp3_path), "-af", trim_filter, "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(destination)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
             )
+            if res.returncode != 0 or not destination.exists() or destination.stat().st_size < 1000:
+                # Fallback without silenceremove if filtering produced an unusable file
+                subprocess.run(
+                    [os.getenv("FFMPEG", "ffmpeg"), "-y", "-i", str(mp3_path), "-ac", "1", "-ar", "24000", "-c:a", "pcm_s16le", str(destination)],
+                    check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                )
         finally:
             mp3_path.unlink(missing_ok=True)
 

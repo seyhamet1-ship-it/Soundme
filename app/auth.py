@@ -218,16 +218,48 @@ def check_rate_limit(user_id: str, client_ip: str) -> None:
             _IP_TIMESTAMPS[client_ip].append(now)
 
 
+# ── Desktop-local bypass ──────────────────────────────────────────────────────
+
+_DESKTOP_USER_ID = "desktop:local"
+_LOOPBACK_IPS = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+def is_desktop_local_request(request: Request) -> bool:
+    """Return True only when:
+      - DESKTOP_LOCAL_MODE=1 is set in the process environment (set by Electron backend-manager),
+      - AND the request originates from a loopback address (127.0.0.1 / ::1 / localhost / testclient).
+
+    This ensures the bypass is never active on a public-facing server.
+    """
+    if os.getenv("DESKTOP_LOCAL_MODE", "0").strip().lower() not in {"1", "true", "yes"}:
+        return False
+    client_host = (request.client.host if request.client else "") or ""
+    return client_host in _LOOPBACK_IPS
+
+
 # ── Unified authentication ────────────────────────────────────────────────────
 
 def get_current_user(request: Request) -> dict[str, Any]:
     """Unified auth: Bearer token header OR session cookie (Google or browser session).
+
+    When DESKTOP_LOCAL_MODE=1 and the request is from loopback, authentication
+    is automatically satisfied with a stable synthetic desktop-local identity.
+    This bypass is ONLY active for requests arriving via 127.0.0.1 from the
+    local Electron shell; it is never triggered on remote connections.
 
     Header takes precedence: if an explicit Authorization header is passed,
     authenticate with it directly.
     Otherwise fall back to session cookie.
     Raises 401 if unauthenticated.
     """
+    # 0. Desktop-local mode: loopback-only auto-auth (Electron desktop app)
+    if is_desktop_local_request(request):
+        return {
+            "user_id": _DESKTOP_USER_ID,
+            "auth_mode": "desktop_local",
+            "google_email": None,
+        }
+
     # 1. Try Bearer token header first (explicit header takes precedence)
     token = extract_token_from_request(request)
     if token:

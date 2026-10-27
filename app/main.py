@@ -134,6 +134,7 @@ def health():
 
     status_str = "ok" if (all(tools.values()) and ready) else ("warming" if not ready else "degraded")
 
+    from app.config import MAX_UPLOAD_MB, MAX_DURATION_MIN
     return {
         "status": status_str,
         "models_ready": ready,
@@ -143,6 +144,8 @@ def health():
         "translation": os.getenv("TRANSLATION_PROVIDER", "nllb-ct2-int8"),
         "tts": tts_info,
         "workers": int(os.getenv("MAX_CONCURRENT_JOBS", "1")),
+        "max_upload_mb": MAX_UPLOAD_MB,
+        "max_duration_min": MAX_DURATION_MIN,
     }
 
 

@@ -48,6 +48,8 @@ def _clear_rate_buckets() -> None:
 
 def test_auth_me_returns_unauthenticated_when_no_session(monkeypatch, tmp_path):
     monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
+    # Desktop-local mode auto-authenticates; disable it to test the unauthenticated path.
+    monkeypatch.delenv("DESKTOP_LOCAL_MODE", raising=False)
     with TestClient(app) as client:
         r = client.get("/auth/me")
         assert r.status_code == 200
@@ -141,6 +143,9 @@ def test_cross_user_id_isolation_in_jobs(monkeypatch, tmp_path):
     """Jobs created by user A (via token A) are invisible to user B (token B)."""
     monkeypatch.setattr(storage, "DB", tmp_path / "jobs.sqlite3")
     monkeypatch.setenv("ACCESS_TOKENS", f"{TEST_TOKEN},{ALT_TOKEN}")
+    # Desktop-local mode overrides token auth with a unified desktop:local identity,
+    # which would break cross-user isolation assertions — disable it for this test.
+    monkeypatch.delenv("DESKTOP_LOCAL_MODE", raising=False)
     _clear_rate_buckets()
 
     # Directly insert a job owned by TEST_USER_ID

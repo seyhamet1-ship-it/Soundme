@@ -1,10 +1,10 @@
-import asyncio, hashlib, json, logging, math, os, re, shutil, time, uuid
+import asyncio, errno, hashlib, json, logging, math, os, re, shutil, time, uuid
 log = logging.getLogger("dubber.api")
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse, Response
-from app.pipeline import process_video, probe, kill_job_process
+from app.pipeline import failure_error, process_video, probe, kill_job_process
 from app.storage import (
     delete_job, get_idempotent_job, get_job, list_jobs, recover_jobs,
     set_idempotent_job, set_job, update_job
@@ -13,7 +13,7 @@ from app.auth import get_current_token, get_current_user, get_user_id_from_reque
 from app.i18n import get_km
 
 from app.config import UPLOAD_DIR, OUTPUT_DIR, BASE_DIR
-from app.config import MAX_UPLOAD_MB, MAX_UPLOAD_BYTES, MAX_VIDEO_SECONDS
+from app.config import MAX_UPLOAD_MB, MAX_UPLOAD_BYTES, MAX_VIDEO_SECONDS, SUPPORTED_EXTENSIONS
 
 router = APIRouter(dependencies=[Depends(get_current_token)])
 public_router = APIRouter()
@@ -25,6 +25,16 @@ OUTPUTS.mkdir(exist_ok=True)
 
 POOL = ThreadPoolExecutor(max_workers=int(os.getenv("MAX_CONCURRENT_JOBS", "1")))
 
+def _is_safe_download_path(p: Path) -> bool:
+    """Security boundary check: ensure path is within ROOT, UPLOADS, or OUTPUTS."""
+    sp = str(p.resolve())
+    return (
+        sp.startswith(str(ROOT.resolve()))
+        or sp.startswith(str(UPLOADS.resolve()))
+        or sp.startswith(str(OUTPUTS.resolve()))
+    )
+
+
 def safe_filename(name: str) -> str:
     base = Path(name or 'video.mp4').name
     clean = re.sub(r'[^a-zA-Z0-9_\-\.]', '_', base)
@@ -35,6 +45,19 @@ def safe_filename(name: str) -> str:
 def worker(jid, path, opts):
     update_job(jid, started_at=time.time())
     process_video(jid, path, opts)
+
+def resume_render_worker(jid, *render_args):
+    """Render reviewed segments and persist failures like the normal worker."""
+    try:
+        from app.render import render
+        render(jid, *render_args)
+    except Exception as exc:
+        if (get_job(jid) or {}).get('status') == 'canceled':
+            return
+        log.exception("reviewed job %s failed", jid)
+        payload = failure_error(exc)
+        progress = min((get_job(jid) or {}).get('progress', 0), 99)
+        update_job(jid, status='failed', stage='failed', progress=progress, error=payload)
 
 @router.post('/api/jobs', status_code=202)
 async def create_job(
@@ -61,6 +84,14 @@ async def create_job(
         raise HTTPException(400, 'Unsupported Khmer voice')
 
     fname = safe_filename(file.filename or 'video.mp4')
+    ext = Path(fname).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(400, get_km('invalid_video'))
+
+    free_disk = shutil.disk_usage(UPLOADS).free
+    if free_disk < 20 * 1024 * 1024:
+        raise HTTPException(507, get_km('disk_space_low'))
+
     jid = uuid.uuid4().hex
     folder = UPLOADS / jid
     folder.mkdir(parents=True, exist_ok=True)
@@ -86,10 +117,10 @@ async def create_job(
         err_msg = str(exc).lower()
         if "duration" in err_msg:
             raise HTTPException(400, get_km('duration_too_long')) from exc
-        if "exceeds the 500 mb" in err_msg or "upload limit" in err_msg:
+        if "exceeds" in err_msg and "limit" in err_msg or "upload limit" in err_msg or "upload_too_large" in err_msg or "500 mb" in err_msg:
             raise HTTPException(413, get_km('upload_too_large')) from exc
-        if "disk" in err_msg:
-            raise HTTPException(400, get_km('disk_space_low')) from exc
+        if "disk" in err_msg or (isinstance(exc, OSError) and getattr(exc, "errno", None) in (errno.ENOSPC, 28)):
+            raise HTTPException(507, get_km('disk_space_low')) from exc
         raise HTTPException(400, get_km('invalid_video')) from exc
 
     opts = {
@@ -137,11 +168,15 @@ async def events(jid: str, request: Request):
 
     async def gen():
         previous = None
-        for _ in range(3600):
+        for sec in range(86400):
+            if await request.is_disconnected():
+                break
             item = get_job(jid, user_id=user_id)
             if item != previous:
                 yield 'data: ' + json.dumps(item, ensure_ascii=False) + '\n\n'
                 previous = item
+            elif sec % 15 == 0:
+                yield ': keepalive\n\n'
             if item and item.get('status') in {'completed', 'failed', 'canceled'}:
                 break
             await asyncio.sleep(1)
@@ -170,15 +205,15 @@ def resume(jid: str, request: Request):
     item = get_job(jid, user_id=user_id)
     if not item or item.get('status') != 'awaiting_review':
         raise HTTPException(409, 'Job is not awaiting review')
-    from app.render import render
     from app.segments import Segment
     src = Path(item['source_path'])
     meta = probe(src)
     video = next(x for x in meta['streams'] if x['codec_type'] == 'video')
     info = type('Info', (), {'language': item['detected_language'], 'language_probability': 1.0})()
-    update_job(jid, status='running', stage='voice')
+    # Clear a prior timing-review diagnostic before re-rendering edited text.
+    update_job(jid, status='running', stage='voice', error=None, timing_review=None)
     POOL.submit(
-        render, jid, src, src.parent,
+        resume_render_worker, jid, src, src.parent,
         [Segment(**x) for x in item['segments']],
         float(meta['format']['duration']),
         item['options'], info, item.get('providers', []),
@@ -225,7 +260,7 @@ def download(jid: str, kind: str, request: Request):
 
     if kind == 'source':
         path = Path(item['source_path']).resolve()
-        if not path.is_file() or not str(path).startswith(str(ROOT)):
+        if not path.is_file() or not _is_safe_download_path(path):
             raise HTTPException(404, 'Source video missing')
         return FileResponse(path, media_type='video/mp4', filename=path.name)
 
@@ -234,7 +269,7 @@ def download(jid: str, kind: str, request: Request):
 
     target_name = Path(outputs[kind]).name
     path = (Path(item['source_path']).parent / target_name).resolve()
-    if not path.is_file() or not str(path).startswith(str(ROOT)):
+    if not path.is_file() or not _is_safe_download_path(path):
         raise HTTPException(404, 'Output missing')
 
     typ = {
@@ -287,16 +322,19 @@ async def upload_init(payload: dict, request: Request):
     if '..' in raw_name or '/' in raw_name or '\\' in raw_name:
         raise HTTPException(400, 'Invalid filename')
     fname = safe_filename(raw_name)
+    ext = Path(fname).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(400, get_km('invalid_video'))
     total_size = int(payload.get('total_size', 0))
     chunk_size = int(payload.get('chunk_size', 5 * 1024 * 1024))
     if total_size <= 0:
         raise HTTPException(400, get_km('file_empty'))
     if total_size > MAX_UPLOAD_BYTES:
         raise HTTPException(413, get_km('upload_too_large'))
-    needed = total_size * 3
+    needed = total_size * 2
     free = shutil.disk_usage(UPLOADS).free
     if free < needed:
-        raise HTTPException(400, get_km('disk_space_low'))
+        raise HTTPException(507, get_km('disk_space_low'))
     uid = uuid.uuid4().hex
     u_folder = CHUNK_DIR / uid
     u_folder.mkdir(parents=True, exist_ok=True)
@@ -465,10 +503,10 @@ async def upload_complete(uid: str, request: Request, payload: dict | None = Non
         err_msg = str(exc).lower()
         if "duration" in err_msg:
             raise HTTPException(400, get_km('duration_too_long')) from exc
-        if "exceeds the 500 mb" in err_msg or "upload limit" in err_msg:
+        if "exceeds" in err_msg and "limit" in err_msg or "upload limit" in err_msg or "upload_too_large" in err_msg or "500 mb" in err_msg:
             raise HTTPException(413, get_km('upload_too_large')) from exc
-        if "disk" in err_msg:
-            raise HTTPException(400, get_km('disk_space_low')) from exc
+        if "disk" in err_msg or (isinstance(exc, OSError) and getattr(exc, "errno", None) in (errno.ENOSPC, 28)):
+            raise HTTPException(507, get_km('disk_space_low')) from exc
         raise HTTPException(400, get_km('invalid_video')) from exc
 
     shutil.rmtree(u_folder, ignore_errors=True)

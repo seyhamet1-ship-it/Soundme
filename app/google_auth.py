@@ -140,6 +140,20 @@ def validate_google_id_token(
 def auth_me(request: Request) -> JSONResponse:
     """Return current identity. Returns authenticated=false if not logged in.
     Public endpoint — never returns 401. Does NOT expose raw tokens or secrets."""
+    # Desktop-local mode: report as authenticated so the frontend skips the login gate
+    try:
+        from app.auth import is_desktop_local_request, _DESKTOP_USER_ID
+        if is_desktop_local_request(request):
+            return JSONResponse({
+                "authenticated": True,
+                "user_id": _DESKTOP_USER_ID,
+                "auth_mode": "desktop_local",
+                "google_email": None,
+                "session_id": None,
+            })
+    except Exception:
+        pass
+
     try:
         from app.auth import get_session_user
         session_user = get_session_user(request)
