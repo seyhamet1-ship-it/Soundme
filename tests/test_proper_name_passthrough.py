@@ -388,3 +388,50 @@ class TestExactFailingVideoSimulation:
     def test_exact_failing_segments_no_longer_raise(self, tmp_path):
         t = TestRenderPassthroughGuard()
         t._run_render_guard(tmp_path, self.SEGMENTS, self.PROVIDERS)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5. Segment.from_dict resilience to frontend/custom fields on resume
+# ──────────────────────────────────────────────────────────────────────────────
+
+class TestSegmentFromDict:
+    def test_from_dict_handles_standard_fields(self):
+        from app.segments import Segment
+        s = Segment.from_dict({
+            "id": 1,
+            "start": 10.0,
+            "end": 12.0,
+            "source_text": "hello",
+            "text_km": "សួស្តី",
+            "speaker": "spk1"
+        })
+        assert s.id == 1
+        assert s.start == 10.0
+        assert s.end == 12.0
+        assert s.source_text == "hello"
+        assert s.text_km == "សួស្តី"
+        assert s.speaker == "spk1"
+
+    def test_from_dict_handles_extra_fields_without_error(self):
+        from app.segments import Segment
+        # Extra fields from frontend or review UI like translation, status, tts_done
+        s = Segment.from_dict({
+            "id": 2,
+            "start": 5.0,
+            "end": 8.0,
+            "source": "world",
+            "translation": "ពិភពលោក",
+            "status": "reviewed",
+            "tts_done": True,
+            "extra_key": 42
+        })
+        assert s.id == 2
+        assert s.start == 5.0
+        assert s.end == 8.0
+        assert s.source_text == "world"
+        assert s.text_km == "ពិភពលោក"
+
+    def test_from_dict_idempotent_on_segment_instance(self):
+        from app.segments import Segment
+        orig = Segment(1, 0.0, 1.0, "hi", "សួស្តី")
+        assert Segment.from_dict(orig) is orig
+
