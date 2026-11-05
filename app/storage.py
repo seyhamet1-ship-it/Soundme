@@ -8,12 +8,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import sqlite3
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger("dubber.storage")
 
 DB = Path(os.getenv("JOB_DB", str(Path(__file__).resolve().parents[1] / "jobs.sqlite3")))
 _lock = threading.RLock()
@@ -247,20 +250,100 @@ def delete_job(job_id: str) -> None:
 
 
 def recover_jobs() -> None:
+    """On server startup, recover interrupted jobs.
+
+    Rules:
+    - Jobs in `running` or `queued` state are interrupted — attempt to requeue.
+    - Only requeue if the source file still exists and has non-zero size.
+    - Respect MAX_QUEUE_CAP: do not submit more jobs than the cap allows.
+    - A `running` job that has been stuck for > STALE_RUNNING_HOURS is treated
+      as orphaned (worker crashed without updating status) and marked failed.
+    - Never submit the same job_id twice (idempotent by tracking submitted IDs).
+    """
+    import os
     from app.i18n import get_km
+
+    max_q = int(os.getenv("MAX_QUEUE_CAP", "5"))
+    stale_hours = float(os.getenv("STALE_RUNNING_HOURS", "6"))
+    stale_threshold = time.time() - stale_hours * 3600
+
+    submitted_ids: set[str] = set()
+    recovered = 0
+
     for job in list_jobs():
-        if job.get("status") in {"queued", "running"}:
-            src = Path(job.get("source_path") or "")
-            if src.is_file() and src.stat().st_size > 0:
-                try:
-                    from app.api import POOL, worker
-                    update_job(job["id"], status="queued", stage="resuming")
-                    POOL.submit(worker, job["id"], str(src), job.get("options", {}))
-                    continue
-                except Exception:
-                    pass
+        status = job.get("status")
+        if status not in {"queued", "running"}:
+            continue
+
+        jid = job["id"]
+        if jid in submitted_ids:
+            continue
+
+        # Check for orphaned running job (no worker running, stuck by timestamp)
+        started_at = job.get("started_at")
+        if status == "running" and started_at and float(started_at) < stale_threshold:
+            log.warning(
+                "RECOVER: job %s has been 'running' for >%.0fh — marking failed (orphaned).",
+                jid, stale_hours,
+            )
             update_job(
-                job["id"],
+                jid,
+                status="failed",
+                stage="failed",
+                error={
+                    "code": "ORPHANED_WORKER",
+                    "message_en": f"Job was stuck in running state for >{stale_hours:.0f}h. Likely interrupted by a crash.",
+                    "message_km": get_km("server_restarted"),
+                },
+            )
+            continue
+
+        # Check source file
+        src = Path(job.get("source_path") or "")
+        if not (src.is_file() and src.stat().st_size > 0):
+            log.warning("RECOVER: job %s source missing — marking failed.", jid)
+            update_job(
+                jid,
+                status="failed",
+                stage="failed",
+                error={
+                    "code": "SERVER_RESTARTED",
+                    "message_en": "Job interrupted by server restart.",
+                    "message_km": get_km("server_restarted"),
+                },
+            )
+            continue
+
+        # Enforce queue cap
+        if recovered >= max_q:
+            log.warning(
+                "RECOVER: queue cap %d reached — marking job %s as failed (too many queued).",
+                max_q, jid,
+            )
+            update_job(
+                jid,
+                status="failed",
+                stage="failed",
+                error={
+                    "code": "QUEUE_CAP_EXCEEDED",
+                    "message_en": "Job could not be recovered: queue capacity exceeded on restart.",
+                    "message_km": get_km("server_restarted"),
+                },
+            )
+            continue
+
+        # Requeue
+        try:
+            from app.api import POOL, worker
+            update_job(jid, status="queued", stage="resuming")
+            POOL.submit(worker, jid, str(src), job.get("options", {}))
+            submitted_ids.add(jid)
+            recovered += 1
+            log.info("RECOVER: requeued job %s (%d/%d).", jid, recovered, max_q)
+        except Exception as exc:
+            log.error("RECOVER: failed to requeue job %s: %s", jid, exc)
+            update_job(
+                jid,
                 status="failed",
                 stage="failed",
                 error={

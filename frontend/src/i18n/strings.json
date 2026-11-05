@@ -32,8 +32,8 @@
     "en": "▶ Preview voice"
   },
   "keep_background": {
-    "km": "រក្សាសំឡេងផ្ទៃក្រោយ",
-    "en": "Keep background sound"
+    "km": "រក្សាតន្ត្រី និងសំឡេងបែបផែនដើម",
+    "en": "Keep Original Background Music & Sound Effects"
   },
   "burn_subtitles": {
     "km": "បង្កប់ចំណងជើងរង",
@@ -246,5 +246,149 @@
   "download_json": {
     "km": "ទាញយកអត្ថបទ (JSON)",
     "en": "Download Transcript (JSON)"
+  },
+  "preserve_background_audio": {
+    "km": "រក្សាតន្ត្រី និងសំឡេងបែបផែនដើម",
+    "en": "Keep Original Background Music & Sound Effects"
+  },
+  "keep_background_help": {
+    "km": "រក្សាសំឡេងផ្ទៃខាងក្រោយតាមដែលអាចធ្វើទៅបាន ខណៈពេលបន្ថែមការបញ្ចូលសំឡេងខ្មែរ។ ការសន្ទនាដើមអាចនៅតែឮ ប្រសិនបើមិនអាចបំបែកសំឡេងបានស្អាតល្អ។",
+    "en": "Preserve background audio where possible while adding Khmer dubbing. Original dialogue may remain audible if clean separation is unavailable."
+  },
+  "background_volume": {
+    "km": "កម្រិតសំឡេងផ្ទៃខាងក្រោយ",
+    "en": "Background volume"
+  },
+  "delete_job_btn": {
+    "km": "លុប",
+    "en": "Delete"
+  },
+  "bulk_delete_btn": {
+    "km": "លុបដែលបានជ្រើស ({count})",
+    "en": "Delete Selected ({count})"
+  },
+  "clear_completed_btn": {
+    "km": "លុបការងារដែលរួចរាល់",
+    "en": "Clear Completed"
+  },
+  "clear_failed_btn": {
+    "km": "លុបការងារដែលបរាជ័យ",
+    "en": "Clear Failed"
+  },
+  "confirm_delete_title": {
+    "km": "បញ្ជាក់ការលុបការងារ",
+    "en": "Confirm Job Deletion"
+  },
+  "confirm_delete_msg": {
+    "km": "តើអ្នកប្រាកដជាចង់លុប {count} ការងារដែលបានជ្រើសរើសទេ? ឯកសារសំឡេង ចំណងជើងរង និងវីដេអូទាំងអស់នៃកិច្ចការទាំងនេះនឹងត្រូវបានលុបចេញជាអចិន្ត្រៃយ៍។",
+    "en": "Are you sure you want to delete {count} selected job(s)? All audio, subtitle, and video files for these jobs will be permanently removed."
+  },
+  "confirm_delete_single": {
+    "km": "តើអ្នកប្រាកដជាចង់លុបការងារ \"{name}\" ទេ? ឯកសារទាំងអស់នៃកិច្ចការនេះនឹងត្រូវបានលុបចេញជាអចិន្ត្រៃយ៍។",
+    "en": "Are you sure you want to delete job \"{name}\"? All files for this job will be permanently removed."
+  },
+  "confirm_delete_action": {
+    "km": "យល់ព្រមលុប",
+    "en": "Confirm Delete"
+  },
+  "cancel_modal_btn": {
+    "km": "ថយក្រោយ",
+    "en": "Cancel"
+  },
+  "delete_success": {
+    "km": "បានលុបការងារដោយជោគជ័យ។",
+    "en": "Job(s) deleted successfully."
+  },
+  "delete_error": {
+    "km": "មិនអាចលុបការងារបានទេ។",
+    "en": "Failed to delete job(s)."
+  },
+  "status_completed": {
+    "km": "បានបញ្ចប់",
+    "en": "Completed"
+  },
+  "status_failed": {
+    "km": "បរាជ័យ",
+    "en": "Failed"
+  },
+  "status_canceled": {
+    "km": "បានបោះបង់",
+    "en": "Cancelled"
+  },
+  "status_processing": {
+    "km": "កំពុងដំណើរការ",
+    "en": "Processing"
+  },
+  "status_awaiting_review": {
+    "km": "រង់ចាំការពិនិត្យ",
+    "en": "Awaiting Review"
+  },
+  "status_queued": {
+    "km": "ក្នុងជួររង់ចាំ",
+    "en": "Queued"
+  },
+  "target_language": {
+    "km": "ភាសាគោលដៅ",
+    "en": "Target Language"
+  },
+  "created_at": {
+    "km": "កាលបរិច្ឆេទ",
+    "en": "Created"
+  },
+  "outputs_ready": {
+    "km": "ឯកសាររួចរាល់",
+    "en": "Outputs Ready"
+  },
+  "select_all": {
+    "km": "ជ្រើសរើសទាំងអស់",
+    "en": "Select All"
+  },
+  "deselect_all": {
+    "km": "ដកការជ្រើសរើសទាំងអស់",
+    "en": "Deselect All"
+  },
+  "download_video": {
+    "km": "ទាញយកវីដេអូ",
+    "en": "Download Video"
+  },
+  "download_audio": {
+    "km": "ទាញយកសំឡេង",
+    "en": "Download Audio"
+  },
+  "download_srt": {
+    "km": "ទាញយក SRT",
+    "en": "Download SRT"
+  },
+  "filter_all": {
+    "km": "ទាំងអស់",
+    "en": "All"
+  },
+  "filter_completed": {
+    "km": "បានបញ្ចប់",
+    "en": "Completed"
+  },
+  "filter_failed": {
+    "km": "បរាជ័យ/បោះបង់",
+    "en": "Failed/Cancelled"
+  },
+  "filter_queued": {
+    "km": "ក្នុងជួររង់ចាំ",
+    "en": "Queued"
+  },
+  "filter_running": {
+    "km": "កំពុងដំណើរការ",
+    "en": "Running"
+  },
+  "clear_completed_btn": {
+    "km": "លុបការងារដែលបានបញ្ចប់",
+    "en": "Clear Completed"
+  },
+  "clear_failed_btn": {
+    "km": "លុបការងារដែលបរាជ័យ",
+    "en": "Clear Failed"
+  },
+  "clear_all_finished_btn": {
+    "km": "លុបការងារបានបញ្ចប់ទាំងអស់",
+    "en": "Clear All Finished"
   }
 }

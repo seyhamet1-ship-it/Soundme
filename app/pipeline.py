@@ -1,8 +1,8 @@
 from __future__ import annotations
-import json,logging,os,subprocess,time
+import datetime,json,logging,os,subprocess,threading,time,traceback
 from pathlib import Path
 from typing import Any
-from app.providers import WhisperASR,translate_khmer
+from app.providers import WhisperASR,translate_khmer,set_translation_diagnostic_context,reset_translation_diagnostic_context
 from app.segments import Segment,merge_segments,normalize_numbers,write_srt,write_vtt
 from app.storage import get_job, update_job
 import shutil
@@ -99,32 +99,17 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
   update_job(job_id,stage="transcribe",progress=18)
   t_asr = time.time()
   asr_ckpt = root / "asr_checkpoint.json"
-  if asr_ckpt.exists():
-   try:
-    asr_data = json.loads(asr_ckpt.read_text(encoding="utf-8"))
-    import types
-    raw_segs = [types.SimpleNamespace(**s) for s in asr_data["segments"]]
-    from app.providers import Transcript
-    transcript = Transcript(raw_segs, asr_data["language"], float(asr_data.get("probability", 1.0)))
-    counters["asr_total"] = len(raw_segs)
-    counters["asr_skipped"] = len(raw_segs)
-    counters["asr_computed"] = 0
-    log.info("Job %s: ASR checkpoint hit; skipped %d segments", job_id, len(raw_segs))
-   except Exception:
-    transcript = WhisperASR(os.getenv("ASR_MODEL","small")).transcribe(wav,opts.get("source_lang","auto"))
-    counters["asr_total"] = len(transcript.segments)
-    counters["asr_skipped"] = 0
-    counters["asr_computed"] = len(transcript.segments)
-  else:
-   transcript = WhisperASR(os.getenv("ASR_MODEL","small")).transcribe(wav,opts.get("source_lang","auto"))
-   counters["asr_total"] = len(transcript.segments)
-   counters["asr_skipped"] = 0
-   counters["asr_computed"] = len(transcript.segments)
-   asr_ckpt.write_text(json.dumps({
-    "language": transcript.language,
-    "probability": transcript.language_probability,
-    "segments": [{"start": float(s.start), "end": float(s.end), "text": str(s.text).strip()} for s in transcript.segments]
-   }, ensure_ascii=False, indent=2), encoding="utf-8")
+  asr = WhisperASR(os.getenv("ASR_MODEL","small"))
+  transcript = asr.transcribe_chunked(
+      wav,
+      opts.get("source_lang","auto"),
+      root=root,
+      job_id=job_id,
+      checkpoint_path=asr_ckpt,
+  )
+  counters["asr_total"] = len(transcript.segments)
+  counters["asr_skipped"] = 0
+  counters["asr_computed"] = len(transcript.segments)
   stage_times["asr"] = round(time.time() - t_asr, 3)
   # Keep ASR timestamps authoritative, merging only contiguous unfinished
   # sentence fragments.  Translation and rendering share this exact list.
@@ -164,7 +149,37 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
      return
     b_texts = missing_texts[b_start:b_start + BATCH_SIZE]
     b_indices = missing_indices[b_start:b_start + BATCH_SIZE]
-    trans_sub, p_last = translate_khmer_batch(b_texts, transcript.language)
+    cur_p = 38 + int(((b_start + len(b_texts)) / len(missing_texts)) * 12)
+    translation_context = set_translation_diagnostic_context(job_id, cur_p, "job_translation")
+    pipeline_batch_start = time.perf_counter()
+    try:
+     log.info("NLLB_DIAGNOSTIC %s", json.dumps({
+      "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+      "pid": os.getpid(), "thread_id": threading.get_ident(), "event_kind": "job_translation",
+      "job_id": job_id, "stage": "translate_khmer_batch", "event": "pipeline_batch_start",
+      "progress": cur_p, "batch_index": b_start // BATCH_SIZE, "segment_count": len(b_texts),
+      "batch_size": BATCH_SIZE
+     }, ensure_ascii=False, sort_keys=True))
+     trans_sub, p_last = translate_khmer_batch(b_texts, transcript.language)
+     log.info("NLLB_DIAGNOSTIC %s", json.dumps({
+      "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+      "pid": os.getpid(), "thread_id": threading.get_ident(), "event_kind": "job_translation",
+      "job_id": job_id, "stage": "translate_khmer_batch", "event": "pipeline_batch_complete",
+      "progress": cur_p, "batch_index": b_start // BATCH_SIZE, "segment_count": len(b_texts),
+      "batch_size": BATCH_SIZE, "elapsed_ms": round((time.perf_counter() - pipeline_batch_start) * 1000, 3)
+     }, ensure_ascii=False, sort_keys=True))
+    except Exception as exc:
+     log.error("NLLB_DIAGNOSTIC %s", json.dumps({
+      "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+      "pid": os.getpid(), "thread_id": threading.get_ident(), "event_kind": "job_translation",
+      "job_id": job_id, "stage": "translate_khmer_batch", "event": "pipeline_batch_error",
+      "progress": cur_p, "batch_index": b_start // BATCH_SIZE, "segment_count": len(b_texts),
+      "batch_size": BATCH_SIZE, "elapsed_ms": round((time.perf_counter() - pipeline_batch_start) * 1000, 3),
+      "outcome": "error", "exception_type": type(exc).__name__, "traceback": traceback.format_exc()
+     }, ensure_ascii=False, sort_keys=True), exc_info=True)
+     raise
+    finally:
+     reset_translation_diagnostic_context(translation_context)
     counters["translate_computed"] += len(trans_sub)
     for idx, km in zip(b_indices, trans_sub):
      segments[idx].text_km = normalize_numbers(km)
@@ -177,8 +192,66 @@ def process_video(job_id:str,source_path:str,options:dict[str,Any]|None=None)->N
    counters["translate_computed"] = 0
    log.info("Job %s: Translation checkpoint hit; skipped %d segments", job_id, len(segments))
   stage_times["translate"] = round(time.time() - t_translate, 3)
+
+  # Attempt translation corrections before review gate — for long videos with many segments,
+  # some translations may have correctable issues (e.g. Chinese characters not in source).
+  # Attempting corrections here determines whether the review gate is truly required or if
+  # the job can proceed past 50% with all segments having valid translations.
+  corrected_any = False
+  for idx in range(len(segments)):
+    s = segments[idx]
+    text_km = getattr(s, "text_km", None) or (s.get("text_km") if isinstance(s, dict) else "")
+    source_text = getattr(s, "source_text", None) or (s.get("source_text") if isinstance(s, dict) else None)
+    if not text_km or not str(text_km).strip():
+        continue
+    try:
+        corrected, corr_reason = attempt_translation_correction(source_text or "", text_km, "auto")
+        if corrected is not None and corr_reason != "contains_chinese_not_in_source":
+            s.text_km = corrected
+            saved_trans[str(s.id)] = {
+                "text_km": s.text_km,
+                "provider": providers[idx] if idx < len(providers) else "nllb",
+                "source": s.source_text
+            }
+            trans_ckpt.write_text(json.dumps(saved_trans, ensure_ascii=False, indent=2), encoding="utf-8")
+            corrected_any = True
+    except Exception:
+        pass
+
+  # Validate translation quality before TTS synthesis
+  # If any segment has invalid translation, pause for user review instead of failing
+  from app.segments import validate_translation_text, attempt_translation_correction
+  review_required = False
+  review_reason = None
+  for idx, s in enumerate(segments):
+    text_km = getattr(s, "text_km", None) or (s.get("text_km") if isinstance(s, dict) else "")
+    source_text = getattr(s, "source_text", None) or (s.get("source") if isinstance(s, dict) else None)
+    if not text_km or not str(text_km).strip():
+        review_required = True
+        review_reason = "empty_translation"
+        break
+    is_valid, reason = validate_translation_text(text_km, source_text or "", "auto")
+    if not is_valid:
+        review_required = True
+        review_reason = reason
+        break
+
+  if review_required:
+    update_job(job_id, status="awaiting_review", stage="review", progress=50,
+      error={"code": "REVIEW_REQUIRED", "message_en": review_reason.replace("_", " ").title(),
+        "message_km": get_km("translation_review_required")},
+      segments=[s.__dict__ for s in segments],
+      providers=providers)
+    return
+
   if opts.get("review_before_tts"):
-   update_job(job_id,status="awaiting_review",stage="review",progress=50,segments=[s.__dict__ for s in segments],providers=providers); return
+    # User explicitly requested review before TTS; pause at review gate
+    update_job(job_id, status="awaiting_review", stage="review", progress=50,
+      segments=[s.__dict__ for s in segments], providers=providers)
+    return
+
+  # All translations valid and no review requested; proceed past 50% to TTS
+  update_job(job_id, stage="translate", progress=60, segments=[s.__dict__ for s in segments], providers=providers)
   if (get_job(job_id) or {}).get("status") == "canceled":
    if root.exists(): shutil.rmtree(root, ignore_errors=True)
    return

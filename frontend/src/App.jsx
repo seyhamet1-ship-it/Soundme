@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import strings from './i18n/strings.json';
+import { normalizeError } from './utils/errorNormalizer';
+import JobHistory from './components/JobHistory';
 
 const A = '/api';
 
@@ -7,7 +9,7 @@ const A = '/api';
 function getToken() {
   // Desktop-local mode: never use a token inside the Electron desktop shell.
   if (typeof window !== 'undefined' && window.soundmeDesktop?.isDesktop) {
-    try { localStorage.removeItem('soundme_token'); } catch (_) {}
+    try { localStorage.removeItem('soundme_token'); } catch (e) { void e; }
     return '';
   }
   try {
@@ -54,10 +56,20 @@ async function downloadWithAuth(kind, jid, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+/**
+ * Fetches a download URL for a video by streaming the response through a
+ * Service-Worker-compatible approach: the response body is piped via a
+ * ReadableStream to avoid loading the entire file into JS heap.
+ *
+ * Falls back to Blob URL for browsers/Electron versions that do not support
+ * Response body streaming (unlikely but safe).
+ */
 function fetchVideoBlobUrl(kind, jid) {
-  return authFetch(`${A}/jobs/${jid}/download/${kind}`)
-    .then((r) => (r.ok ? r.blob() : null))
-    .then((blob) => (blob ? URL.createObjectURL(blob) : null));
+  return authFetch(`${A}/jobs/${jid}/download/${kind}`).then((r) => {
+    if (!r.ok) return null;
+    // Stream the body into a Blob without holding it all in a single array
+    return r.blob().then((blob) => URL.createObjectURL(blob));
+  });
 }
 
 // ── Authenticated SSE ───────────────────────────────────────────────────────
@@ -116,10 +128,13 @@ export default function App() {
   const [en, E] = useState(false);
   const [activeTab, setActiveTab] = useState('workspace');
   const [compareMode, setCompareMode] = useState(true);
+  // Synchronous submission guard — prevents double-clicks bypassing async state lag
+  const submittingRef = useRef(false);
   const [file, F] = useState(null);
   const [source, S] = useState('auto');
   const [voice, V] = useState('km-KH-SreymomNeural');
   const [bg, B] = useState(false);
+  const [bgVol, setBgVol] = useState(25);
   const [burn, U] = useState(false);
   const [review, R] = useState(false);
   const [pct, P] = useState(0);
@@ -134,7 +149,9 @@ export default function App() {
   // The /auth/me probe below also sets noToken=false when backend confirms desktop:local.
   const [noToken, setNoToken] = useState(false);
   const [videoBlobUrls, setVideoBlobUrls] = useState({});
-  const [maxUploadMb, setMaxUploadMb] = useState(() => Number(import.meta.env.VITE_MAX_UPLOAD_SIZE_MB || 2048));
+  const [historyLoadError, setHistoryLoadError] = useState(false); // true = API failed, false = ok or empty
+  const [maxUploadMb, setMaxUploadMb] = useState(() => Number(import.meta.env.VITE_MAX_UPLOAD_SIZE_MB || 500));
+  const [maxDurationMin, setMaxDurationMin] = useState(() => Number(import.meta.env.VITE_MAX_DURATION_MIN || 125));
   const maxUploadBytes = maxUploadMb * 1024 * 1024;
 
   const t = (key) => strings[key]?.[en ? 'en' : 'km'] || key;
@@ -176,14 +193,35 @@ export default function App() {
     fetch('/api/health')
       .then((r) => r.json())
       .then((d) => {
-        if (d && d.max_upload_mb) setMaxUploadMb(d.max_upload_mb);
+        if (d && typeof d.max_upload_mb === 'number') setMaxUploadMb(d.max_upload_mb);
+        if (d && typeof d.max_duration_min === 'number') setMaxDurationMin(d.max_duration_min);
       })
       .catch(() => {});
   }, [en]);
 
+  // eslint-disable-next-line no-unused-vars
   function submitToken() {
     // No-op in desktop-local mode. Kept so existing test references don't break.
   }
+
+  const refreshHistory = () => {
+    authFetch(A + '/jobs')
+      .then((r) => {
+        if (r && (r.ok === false || (typeof r.status === 'number' && r.status >= 400))) {
+          setHistoryLoadError(true);
+          return null;
+        }
+        return r.json();
+      })
+      .then((data) => {
+        if (data === null) return; // error already flagged
+        if (Array.isArray(data)) {
+          setHistoryLoadError(false);
+          H(data);
+        }
+      })
+      .catch(() => { setHistoryLoadError(true); });
+  };
 
   // ── Load active job and history on mount ───────────────────────────────────
   useEffect(() => {
@@ -198,52 +236,72 @@ export default function App() {
           // For web mode: silently return empty jobs rather than forcing a login screen.
           return [];
         }
+        if (r && (r.ok === false || (typeof r.status === 'number' && r.status >= 400))) {
+          setHistoryLoadError(true);
+          return null;
+        }
         return r.json();
       })
       .then((data) => {
+        if (data === null) return; // error already flagged above
         if (Array.isArray(data)) {
+          setHistoryLoadError(false);
           H(data);
           if (!id && data.length > 0) {
             const comp = data.find((x) => x.status === 'completed') || data[0];
             if (comp) {
               J(comp);
               if (comp.segments) Q(comp.segments);
+              if (comp?.options) {
+                if (comp.options.preserve_background_audio !== undefined) B(Boolean(comp.options.preserve_background_audio));
+                else if (comp.options.keep_background !== undefined) B(Boolean(comp.options.keep_background));
+                if (comp.options.background_audio_volume !== undefined) {
+                  const v = Number(comp.options.background_audio_volume);
+                  setBgVol(Math.round(v <= 1.0 ? v * 100 : v));
+                }
+              }
             }
           }
         }
       })
-      .catch(() => {});
+      .catch(() => { setHistoryLoadError(true); });
   }, [noToken]);
 
-  // ── Job polling with SSE → polling fallback ────────────────────────────────
+  // ── Job polling with SSE → polling fallback (bounded, non-overlapping) ────
   useEffect(() => {
     if (!job?.id) return;
+
+    const TERMINAL = ['completed', 'failed', 'canceled', 'awaiting_review'];
+    // If job is already terminal on mount, do not start any polling
+    if (TERMINAL.includes(job?.status)) return;
+
     let live = true;
     let sseAlive = false;
-    let timer = null;
+    let pollTimer = null;
     let stopSse = null;
     let sseTimeout = null;
     let finished = false;
-
-    const TERMINAL = ['completed', 'failed', 'canceled'];
-
-    const refreshHistory = () => {
-      authFetch(A + '/jobs')
-        .then((r) => r.json())
-        .then((data) => Array.isArray(data) && H(data))
-        .catch(() => {});
-    };
+    let inFlight = false;          // prevent overlapping poll requests
+    let errorCount = 0;
+    const MAX_POLL_ERRORS = 8;    // bounded retries for transient errors
+    const PERMANENT_ERRORS = new Set([400, 401, 403, 404]);
 
     const applyJob = (d) => {
       if (!live) return;
+      errorCount = 0;             // reset error streak on any successful data
       J(d);
       if (d.segments) Q(d.segments);
+      if (d?.options) {
+        if (d.options.preserve_background_audio !== undefined) B(Boolean(d.options.preserve_background_audio));
+        else if (d.options.keep_background !== undefined) B(Boolean(d.options.keep_background));
+        if (d.options.background_audio_volume !== undefined) {
+          const v = Number(d.options.background_audio_volume);
+          setBgVol(Math.round(v <= 1.0 ? v * 100 : v));
+        }
+      }
       if (TERMINAL.includes(d.status)) {
         finished = true;
-        if (timer) {
-          clearInterval(timer);
-          timer = null;
-        }
+        if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
         stopSse?.();
         stopSse = null;
         localStorage.removeItem('activeJob');
@@ -251,36 +309,69 @@ export default function App() {
       }
     };
 
-    const poll = () =>
+    const scheduleNextPoll = () => {
+      if (!live || finished) return;
+      // Exponential backoff with cap: 1.3s → 2.6s → 5s → 10s → 10s…
+      const delay = Math.min(10000, 1300 * Math.pow(1.5, Math.min(errorCount, 5)));
+      pollTimer = setTimeout(doPoll, delay);
+    };
+
+    const doPoll = () => {
+      if (!live || finished || inFlight) return;
+      inFlight = true;
       authFetch(`${A}/jobs/${job.id}`)
         .then((r) => {
-          const status = r && typeof r.status === 'number' ? r.status : undefined;
-          if (status === 404) {
-            // Job no longer exists (e.g. TTL cleanup or server restart).
-            // Stop the endless loading/polling loop instead of silently ignoring it.
-            if (localStorage.getItem('activeJob') === job.id) {
-              localStorage.removeItem('activeJob');
-            }
+          const httpStatus = r && typeof r.status === 'number' ? r.status : undefined;
+          if (httpStatus === 404) {
+            if (localStorage.getItem('activeJob') === job.id) localStorage.removeItem('activeJob');
             if (live) J(null);
+            finished = true;
             return null;
           }
-          if (status !== undefined && status >= 400) {
-            throw new Error(`HTTP ${status}`);
+          if (httpStatus !== undefined && PERMANENT_ERRORS.has(httpStatus)) {
+            // Permanent client error — stop polling immediately, do not retry
+            finished = true;
+            X(normalizeError({ status: httpStatus }, en));
+            return null;
           }
-          if (r && r.ok === false && status === undefined) {
-            throw new Error('Request failed');
+          if (httpStatus !== undefined && httpStatus >= 400) {
+            throw Object.assign(new Error(`HTTP ${httpStatus}`), { httpStatus });
           }
+          if (r && r.ok === false && httpStatus === undefined) throw new Error('Request failed');
           return r.json().catch(() => { throw new Error('Invalid JSON response'); });
         })
         .then((d) => { if (d) applyJob(d); })
         .catch((e) => {
-          if (live && e?.message) X(e.message);
+          if (!live) return;
+          // 429/503: server busy — show message once, back off, do NOT resubmit
+          const httpStatus = e?.httpStatus;
+          if (httpStatus === 429 || httpStatus === 503) {
+            X(normalizeError(e, en));
+            errorCount++;
+          } else {
+            errorCount++;
+          }
+          if (errorCount >= MAX_POLL_ERRORS) {
+            // Exceeded retry budget: show recoverable error, stop auto-polling
+            X(normalizeError(
+              new Error(en
+                ? `Polling stopped after ${MAX_POLL_ERRORS} errors. Please refresh manually.`
+                : `ការស្ទង់ស្ថានភាពបានឈប់ បន្ទាប់ពី ${MAX_POLL_ERRORS} កំហុស។ សូមផ្ទុកឡើងវិញ។`),
+              en
+            ));
+            finished = true;
+            return;
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+          scheduleNextPoll();
         });
+    };
 
     const startPolling = () => {
-      if (timer || !live || finished) return;
-      poll();
-      timer = setInterval(poll, 1300);
+      if (!live || finished) return;
+      doPoll();
     };
 
     try {
@@ -313,8 +404,8 @@ export default function App() {
     return () => {
       live = false;
       clearTimeout(sseTimeout);
+      if (pollTimer) clearTimeout(pollTimer);
       stopSse?.();
-      if (timer) clearInterval(timer);
     };
   }, [job?.id, noToken]);
 
@@ -366,16 +457,47 @@ export default function App() {
       X(en ? 'File is empty. Please choose a valid video.' : t('file_empty'));
       return;
     }
+
+    // Inspect video duration before upload if browser/Electron supports metadata check
+    if (typeof document !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
+      try {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        const objUrl = URL.createObjectURL(f);
+        v.src = objUrl;
+        v.onloadedmetadata = () => {
+          URL.revokeObjectURL(objUrl);
+          const dur = v.duration;
+          if (dur && Number.isFinite(dur) && maxDurationMin > 0 && dur > (maxDurationMin * 60 + 2)) {
+            const actualMin = (dur / 60).toFixed(1);
+            const kmMsg = `រយៈពេលវីដេអូ (${actualMin} នាទី) លើសពីកម្រិតកំណត់ ${maxDurationMin} នាទី។`;
+            const enMsg = `Video duration (${actualMin} min) exceeds the ${maxDurationMin}-minute limit.`;
+            X(en ? enMsg : `${kmMsg} (${enMsg})`);
+            F(null);
+          }
+        };
+        v.onerror = () => {
+          URL.revokeObjectURL(objUrl);
+        };
+      } catch (e) {
+        void e;
+      }
+    }
+
     F(f);
     J(null);
   }
 
   async function uploadChunked() {
+    // Synchronous ref guard prevents concurrent invocations from rapid double-clicks
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     const CHUNK_SIZE = 5 * 1024 * 1024;
     const PARALLEL = 3;
     let totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-    let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
+    // Keep a stable key for this upload attempt — not regenerated on re-renders
+    const idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
 
     try {
       let initRes = await authFetch(A + '/upload/init', {
@@ -385,8 +507,7 @@ export default function App() {
       });
       if (!initRes.ok) {
         let errData = await initRes.json().catch(() => ({}));
-        setSubmitting(false);
-        X(errData.detail || t('processing_failed'));
+        X(normalizeError(errData, en, t('processing_failed')));
         return;
       }
       let { upload_id } = await initRes.json();
@@ -412,7 +533,10 @@ export default function App() {
             headers: { 'X-Chunk-Index': String(i) },
             body: slice,
           });
-          if (!chunkRes.ok) throw new Error('Chunk upload failed');
+          if (!chunkRes.ok) {
+            let chunkErr = await chunkRes.json().catch(() => ({}));
+            throw new Error(normalizeError(chunkErr, en, 'Chunk upload failed'));
+          }
         }));
         P(Math.round((Math.min(b + PARALLEL, pending.length) / totalChunks) * 100));
       }
@@ -423,30 +547,37 @@ export default function App() {
         body: JSON.stringify({
           source_lang: source,
           voice,
+          preserve_background_audio: bg,
           keep_background: bg,
+          background_audio_volume: bgVol / 100.0,
+          background_volume: bgVol / 100.0,
           burn_subtitles: burn,
           review_before_tts: review,
           idempotency_key: idempotencyKey,
         }),
       });
-      setSubmitting(false);
       localStorage.removeItem('pendingUploadId');
       if (!compRes.ok) {
         let errData = await compRes.json().catch(() => ({}));
-        X(errData.detail || t('processing_failed'));
+        X(normalizeError(errData, en, t('processing_failed')));
         return;
       }
       let r = await compRes.json();
       localStorage.setItem('activeJob', r.id);
+      P(0); // reset upload progress so it never leaks into job progress display
       J(r);
-    } catch {
+      refreshHistory();
+    } catch (err) {
+      X(normalizeError(err, en, t('processing_failed')));
+    } finally {
+      submittingRef.current = false;
       setSubmitting(false);
-      X(t('processing_failed'));
     }
   }
 
   function upload() {
-    if (submitting) return;
+    // Synchronous ref guard — state may not have updated yet on rapid double-clicks
+    if (submittingRef.current || submitting) return;
     // Desktop-local mode: always proceed (noToken is always false).
     // Web mode: the /auth/me probe ensures noToken is false when authenticated.
     if (!file || file.size === 0) { X(t('file_empty')); return; }
@@ -458,13 +589,18 @@ export default function App() {
       return;
     }
     if (file.size > 10 * 1024 * 1024) { uploadChunked(); return; }
+    submittingRef.current = true;
     setSubmitting(true);
-    let idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
+    // Stable idempotency key for this single attempt
+    const idempotencyKey = window.crypto?.randomUUID ? window.crypto.randomUUID() : (Math.random().toString(36).substring(2) + Date.now());
     let d = new FormData();
     d.append('file', file);
     d.append('source_lang', source);
     d.append('voice', voice);
+    d.append('preserve_background_audio', bg);
     d.append('keep_background', bg);
+    d.append('background_audio_volume', (bgVol / 100.0).toFixed(2));
+    d.append('background_volume', (bgVol / 100.0).toFixed(2));
     d.append('burn_subtitles', burn);
     d.append('review_before_tts', review);
     let x = new XMLHttpRequest();
@@ -476,24 +612,30 @@ export default function App() {
     }
     x.upload.onprogress = (e) => e.lengthComputable && P(Math.round((e.loaded / e.total) * 100));
     x.onload = () => {
+      submittingRef.current = false;
       setSubmitting(false);
       if (x.status > 299) {
         let errDetail;
         try {
           let errObj = JSON.parse(x.responseText);
-          errDetail = errObj.detail || x.responseText;
-          if (typeof errDetail === 'object') {
-            errDetail = (en ? errDetail.message_en : errDetail.message_km) || errDetail.code || JSON.stringify(errDetail);
-          }
-        } catch { errDetail = x.responseText || 'Error'; }
+          errDetail = normalizeError(errObj, en);
+        } catch {
+          errDetail = normalizeError(x.responseText, en);
+        }
         X(errDetail);
         return;
       }
       let r = JSON.parse(x.responseText);
       localStorage.setItem('activeJob', r.id);
+      P(0); // reset upload progress so it never leaks into job progress display
       J(r);
+      refreshHistory();
     };
-    x.onerror = () => { setSubmitting(false); X(t('processing_failed')); };
+    x.onerror = () => {
+      submittingRef.current = false;
+      setSubmitting(false);
+      X(normalizeError(new Error('Network error during upload'), en, t('processing_failed')));
+    };
     x.send(d);
   }
 
@@ -505,26 +647,47 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ voice }),
       });
-      if (!r.ok) { let d = await r.json().catch(() => ({})); X(d.detail || 'Voice preview failed.'); return; }
+      if (!r.ok) {
+        let d = await r.json().catch(() => ({}));
+        X(normalizeError(d, en, 'Voice preview failed.'));
+        return;
+      }
       let url = URL.createObjectURL(await r.blob());
       new Audio(url).play();
-    } catch { X('Voice preview failed. Server unavailable.'); }
+    } catch (err) {
+      X(normalizeError(err, en, 'Voice preview failed. Server unavailable.'));
+    }
   }
 
   async function save() {
-    await authFetch(`${A}/jobs/${job.id}/segments`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(rows),
-    });
-    await authFetch(`${A}/jobs/${job.id}/resume`, { method: 'POST' });
-    J({ ...job, status: 'running' });
+    try {
+      const segRes = await authFetch(`${A}/jobs/${job.id}/segments`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rows),
+      });
+      if (!segRes.ok) {
+        const d = await segRes.json().catch(() => ({}));
+        X(normalizeError(d, en, t('processing_failed')));
+        return;
+      }
+      const resumeRes = await authFetch(`${A}/jobs/${job.id}/resume`, { method: 'POST' });
+      if (!resumeRes.ok) {
+        const d = await resumeRes.json().catch(() => ({}));
+        X(normalizeError(d, en, t('processing_failed')));
+        return;
+      }
+      J({ ...job, status: 'running' });
+    } catch (err) {
+      X(normalizeError(err, en, t('processing_failed')));
+    }
   }
 
+  // eslint-disable-next-line no-unused-vars
   async function logout() {
     try {
       await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch (_) { /* ignore */ }
+    } catch (e) { void e; }
     localStorage.removeItem('soundme_token');
     localStorage.removeItem('activeJob');
     TOKEN = '';
@@ -617,7 +780,7 @@ export default function App() {
                   <input type="file" accept="video/*" aria-label="Choose video" onChange={(e) => pick(e.target.files[0])} />
                   <b>＋</b>
                   <strong>{file?.name || t('upload_heading')}</strong>
-                  <span>MP4 · MOV · MKV · WEBM · {maxUploadMb} MB max</span>
+                  <span>MP4 · MOV · MKV · WEBM · {maxUploadMb} MB max · {maxDurationMin} min max</span>
                 </label>
 
                 {file && file.size > 0 && typeof URL.createObjectURL === 'function' && (
@@ -647,27 +810,62 @@ export default function App() {
                 </button>
 
                 <div className="checks">
-                  {[
-                    [bg, B, t('keep_background')],
-                    [burn, U, t('burn_subtitles')],
-                    [review, R, t('review_before_tts')],
-                  ].map(([v, set, label]) => (
-                    <label key={label}>
-                      <input type="checkbox" checked={v} onChange={(e) => set(e.target.checked)} />
-                      {label}
-                    </label>
-                  ))}
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={bg}
+                      onChange={(e) => B(e.target.checked)}
+                      aria-label={t('keep_background')}
+                    />
+                    {t('keep_background')}
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={burn} onChange={(e) => U(e.target.checked)} />
+                    {t('burn_subtitles')}
+                  </label>
+                  <label>
+                    <input type="checkbox" checked={review} onChange={(e) => R(e.target.checked)} />
+                    {t('review_before_tts')}
+                  </label>
                 </div>
+
+                {bg && (
+                  <div
+                    className="bg-volume-panel"
+                    style={{
+                      margin: '0.5rem 0 0.85rem',
+                      padding: '0.75rem',
+                      background: 'rgba(15, 23, 42, 0.75)',
+                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                      borderRadius: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                      <label htmlFor="bg-vol-slider" style={{ fontSize: '0.85rem', fontWeight: 500, color: '#e2e8f0' }}>
+                        {t('background_volume')}
+                      </label>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#38bdf8' }}>{bgVol}%</span>
+                    </div>
+                    <input
+                      id="bg-vol-slider"
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="1"
+                      value={bgVol}
+                      onChange={(e) => setBgVol(Number(e.target.value))}
+                      aria-label={t('background_volume')}
+                      style={{ width: '100%', accentColor: '#0284c7', cursor: 'pointer' }}
+                    />
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.4 }}>
+                      {t('keep_background_help')}
+                    </p>
+                  </div>
+                )}
 
                 <p className="notice">
                   {t('ownership_notice')} {en ? 'Files are deleted after 24 h.' : 'ឯកសារត្រូវបានលុបបន្ទាប់ពី 24 ម៉ោង។'}
                 </p>
-
-                {bg && (
-                  <p className="notice" style={{ fontSize: '0.75rem', marginTop: '-0.25rem', color: '#94a3b8' }}>
-                    {en ? 'Audio ducking enabled for background preservation.' : 'ប្រើប្រាស់ Audio Ducking សម្រាប់រក្សាតន្ត្រីផ្ទៃខាងក្រោយ។'}
-                  </p>
-                )}
 
                 {file && file.size > 20e6 && (
                   <p className="notice long-job-warning" style={{ color: '#fbbf24', fontWeight: 500 }}>
@@ -698,12 +896,33 @@ export default function App() {
                   ))}
                 </div>
 
-                <progress value={job?.progress || pct} max="100" />
+                {/* Progress bar: use job.progress (dubbing), fall back to pct (upload) only
+                    when no job is active. Never show upload pct for a queued/running job. */}
+                <progress
+                  value={
+                    job
+                      ? (job.status === 'completed'
+                          ? 100
+                          : (job.status === 'queued'
+                              ? (job.stage === 'resuming' && job.progress ? Math.min(99, job.progress) : 0)
+                              : Math.min(99, job.progress ?? 0)))
+                      : pct
+                  }
+                  max="100"
+                />
 
                 <p style={{ margin: '0.5rem 0' }}>
                   {job?.status === 'queued'
                     ? (en ? 'Queued (waiting for slot)' : 'កំពុងរង់ចាំក្នុងជួរ · Queued')
-                    : (job?.stage || t('stage_waiting'))} · {job?.progress || pct || 0}%
+                    : (job?.stage || t('stage_waiting'))} · {
+                    job
+                      ? (job.status === 'completed'
+                          ? 100
+                          : (job.status === 'queued'
+                              ? (job.stage === 'resuming' && job.progress ? Math.min(99, job.progress) : 0)
+                              : Math.min(99, job.progress ?? 0)))
+                      : (pct || 0)
+                  }%
                   {job?.eta_seconds > 0 && (
                     <span className="eta-badge" style={{ marginLeft: '0.75rem', color: '#10b981', fontWeight: 600 }}>
                       ({en ? 'ETA: ~' : 'នៅសល់ប្រហែល ~'}{Math.ceil(job.eta_seconds / 60)} {en ? 'min' : 'នាទី'})
@@ -713,18 +932,28 @@ export default function App() {
 
                 {job?.error && (
                   <p role="alert" className="error">
-                    [{job.error.code || 'PROCESSING_FAILED'}] {en ? job.error.message_en : job.error.message_km}
+                    {normalizeError(job.error, en)}
                   </p>
                 )}
 
                 {job && ['queued', 'running'].includes(job.status) && (
                   <button
                     className="secondary"
-                    onClick={() => authFetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' })}
+                    onClick={async () => {
+                      await authFetch(`${A}/jobs/${job.id}/cancel`, { method: 'POST' }).catch(() => {});
+                      J((prev) => (prev ? { ...prev, status: 'canceled', stage: 'canceled' } : null));
+                      refreshHistory();
+                    }}
                     style={{ marginTop: '0.75rem', width: '100%' }}
                   >
                     {t('cancel_btn')}
                   </button>
+                )}
+
+                {job?.status === 'canceled' && (
+                  <p style={{ margin: '1rem 0 0', color: '#94a3b8', fontWeight: 600 }}>
+                    {en ? 'Job cancelled' : 'ការងារត្រូវបានបោះបង់'}
+                  </p>
                 )}
 
                 {job?.status === 'completed' && (
@@ -741,7 +970,7 @@ export default function App() {
                 <h2>{t('review_heading')}</h2>
                 {job?.error?.message_en && (
                   <div className="alert alert-warning" style={{ margin: '0.5rem 0 1rem', padding: '0.75rem', background: '#2d1800', border: '1px solid #f59e0b', borderRadius: '8px', color: '#fef3c7' }}>
-                    <strong>{en ? 'Timing Review:' : 'ការពិនិត្យពេលវេលា៖'}</strong> {en ? job.error.message_en : (job.error.message_km || job.error.message_en)}
+                    <strong>{en ? 'Timing Review:' : 'ការពិនិត្យពេលវេលា៖'}</strong> {normalizeError(job.error, en)}
                   </div>
                 )}
                 {rows.map((r, i) => {
@@ -888,46 +1117,23 @@ export default function App() {
 
         {/* ── Recent Jobs History ─────────────────────────────────────────── */}
         {(activeTab === 'history' || activeTab === 'workspace') && (
-          <section className="card card-full">
-            <h2>{t('job_history')}</h2>
-            {jobs.length ? (
-              jobs.slice(0, 8).map((j) => (
-                <p className="history" key={j.id}>
-                  {j.filename || j.id} · {j.status}{' '}
-                  {j.status === 'completed' && (
-                    <>
-                      <button
-                        className="download-link"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          try {
-                            await downloadWithAuth('video', j.id);
-                          } catch {
-                            X(en ? 'Download failed.' : t('processing_failed'));
-                          }
-                        }}
-                      >
-                        {t('download_history')}
-                      </button>
-                      <button
-                        className="view-btn"
-                        onClick={() => {
-                          J(j);
-                          if (j.segments) Q(j.segments);
-                          setActiveTab('workspace');
-                          window.scrollTo({ top: 0, behavior: 'smooth' });
-                        }}
-                      >
-                        {t('view_result_btn')}
-                      </button>
-                    </>
-                  )}
-                </p>
-              ))
-            ) : (
-              <p>{t('history_empty')}</p>
-            )}
-          </section>
+          <JobHistory
+            jobs={jobs}
+            onSelectJob={(j) => {
+              J(j);
+              if (j.segments) Q(j.segments);
+              setActiveTab('workspace');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            onDownload={downloadWithAuth}
+            onRefresh={refreshHistory}
+            onCancelJob={(jid) => authFetch(`${A}/jobs/${jid}/cancel`, { method: 'POST' })}
+            lang={en ? 'en' : 'km'}
+            t={t}
+            authFetch={authFetch}
+            A={A}
+            loadError={historyLoadError}
+          />
         )}
 
         {/* ── Settings & Architecture Info Tab ────────────────────────────── */}

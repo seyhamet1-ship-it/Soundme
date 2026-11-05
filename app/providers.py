@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
+import datetime
+import json
 import logging
 import math
 import os
 import struct
+import threading
+import time
+import traceback
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +20,50 @@ from typing import Any
 import numpy as np
 
 log = logging.getLogger(__name__)
+
+_translation_context: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+    "nllb_translation_context",
+    default={"event_kind": "unspecified", "job_id": None, "progress": None},
+)
+
+
+def _utc_timestamp_ms() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _diagnostic_event(stage: str, event: str, **fields: Any) -> dict[str, Any]:
+    context = _translation_context.get()
+    payload: dict[str, Any] = {
+        "timestamp": _utc_timestamp_ms(),
+        "pid": os.getpid(),
+        "thread_id": threading.get_ident(),
+        "event_kind": context.get("event_kind", "unspecified"),
+        "job_id": context.get("job_id"),
+        "stage": stage,
+        "event": event,
+    }
+    if context.get("progress") is not None:
+        payload["progress"] = context.get("progress")
+    payload.update(fields)
+    return payload
+
+
+def _log_diagnostic(stage: str, event: str, level: int = logging.INFO, **fields: Any) -> None:
+    log.log(level, "NLLB_DIAGNOSTIC %s", json.dumps(_diagnostic_event(stage, event, **fields), ensure_ascii=False, sort_keys=True))
+
+
+def _log_diagnostic_exception(stage: str, event: str, exc: Exception, **fields: Any) -> None:
+    fields.update({"outcome": "error", "exception_type": type(exc).__name__, "traceback": traceback.format_exc()})
+    log.error("NLLB_DIAGNOSTIC %s", json.dumps(_diagnostic_event(stage, event, **fields), ensure_ascii=False, sort_keys=True), exc_info=True)
+
+
+def set_translation_diagnostic_context(job_id: str | None, progress: int | None, event_kind: str = "job_translation") -> Any:
+    return _translation_context.set({"event_kind": event_kind, "job_id": job_id, "progress": progress})
+
+
+def reset_translation_diagnostic_context(token: Any) -> None:
+    _translation_context.reset(token)
+
 
 # Force HuggingFace Hub / Transformers to use only locally cached models.
 # All models (Whisper ASR, NLLB) are cached locally — no network access needed.
@@ -70,12 +121,33 @@ class WhisperASR:
             data = np.interp(np.linspace(0, data.size - 1, new_size), np.arange(data.size), data).astype(np.float32)
         return data
 
-    def transcribe(self, audio: Path, source_lang: str = "auto") -> Transcript:
+    def transcribe(self, audio, source_lang: str = "auto", sample_rate: int | None = None) -> Transcript:
+        import numpy as np
+
         language = None if source_lang == "auto" else source_lang
-        samples = self._load_wav(audio)
-        audio_input = samples if samples is not None else str(audio)
+
+        if isinstance(audio, np.ndarray):
+            if sample_rate is None:
+                sample_rate = 16000
+            if int(sample_rate) != 16000:
+                raise ValueError("audio ndarray sample rate must be 16000 Hz")
+            if audio.ndim != 1:
+                raise ValueError("audio ndarray must be a 1-D mono array")
+            if not np.issubdtype(audio.dtype, np.floating):
+                raise ValueError("audio ndarray must have a floating-point dtype")
+            if audio.size == 0:
+                return Transcript([], "en" if language is None else language, 0.0)
+            if not np.all(np.isfinite(audio)):
+                raise ValueError("audio ndarray contains NaN or Inf values")
+            audio_input = np.asarray(audio, dtype=np.float32).reshape(-1)
+        else:
+            samples = self._load_wav(audio)
+            audio_input = samples if samples is not None else str(audio)
+            if isinstance(audio_input, np.ndarray) and audio_input.size == 0:
+                return Transcript([], "en" if language is None else language, 0.0)
         beam_size = int(os.getenv("ASR_BEAM_SIZE", "1"))
         use_batched = os.getenv("ASR_BATCHED", "1") != "0"
+        import subprocess
 
         if use_batched:
             try:
@@ -130,6 +202,24 @@ class WhisperASR:
             segs = list(segments)
         return Transcript(segs, info.language, float(info.language_probability))
 
+    def transcribe_chunked(self, *args, **kwargs):
+        from app.asr_chunking import ChunkedASR
+        audio = args[0] if args else kwargs.pop("audio")
+        rest = list(args[1:])
+        init_keys = {"chunk_duration", "overlap", "max_retries", "beam_size", "max_new_tokens"}
+        init_kwargs = {k: v for k, v in kwargs.items() if k in init_keys}
+        asr = ChunkedASR(self, **init_kwargs)
+        call_kwargs = {k: v for k, v in kwargs.items() if k not in init_keys}
+        if "source_lang" not in call_kwargs and rest:
+            call_kwargs["source_lang"] = rest.pop(0)
+        if rest and "source_lang" not in call_kwargs:
+            call_kwargs["source_lang"] = rest.pop(0)
+        return asr.transcribe(audio, **call_kwargs)
+
+    transcribe_chunks = transcribe_chunked
+    transcribe_long = transcribe_chunked
+    transcribe_long_form = transcribe_chunked
+
 
 def _local_ct2_model_dir(source: Path) -> Path:
     """Copy a CT2 model from a slow/virtual drive to a local cache once.
@@ -172,32 +262,63 @@ class NllbTranslator:
 
     def __init__(self) -> None:
         model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
-        with NllbTranslator._lock:
-    # Check for CT2 int8 model
+        context = _translation_context.get()
+        stage = "startup_warmup" if context.get("event_kind") == "startup_warmup" else "nllb_constructor"
+        constructor_start = time.perf_counter()
+        _log_diagnostic(stage, "constructor_start", model_already_cached=bool(NllbTranslator._ct2_translator is not None or NllbTranslator._model is not None), tokenizer_already_cached=NllbTranslator._tokenizer is not None)
+        lock_wait_start = time.perf_counter()
+        NllbTranslator._lock.acquire()
+        lock_wait_ms = round((time.perf_counter() - lock_wait_start) * 1000, 3)
+        lock_held_start = time.perf_counter()
+        try:
             ct2_dir = _local_ct2_model_dir(Path(__file__).resolve().parents[1] / "tools" / "models" / "nllb-200-distilled-600M-ct2-int8")
             if ct2_dir.is_dir() and (ct2_dir / "model.bin").exists() and os.getenv("USE_CT2", "1") != "0":
                 if NllbTranslator._ct2_translator is None:
+                    ct2_start = time.perf_counter()
                     try:
                         import ctranslate2
-                        NllbTranslator._ct2_translator = ctranslate2.Translator(
-                            str(ct2_dir), device="cpu", compute_type="int8", inter_threads=2, intra_threads=4
-                        )
-                    except Exception as ct2_err:
-                        log.warning("CTranslate2 init failed (%s); falling back to PyTorch", ct2_err)
+                        NllbTranslator._ct2_translator = ctranslate2.Translator(str(ct2_dir), device="cpu", compute_type="int8", inter_threads=2, intra_threads=4)
+                        _log_diagnostic(stage, "ct2_model_load_complete", elapsed_ms=round((time.perf_counter() - ct2_start) * 1000, 3), model_already_cached=False)
+                    except Exception as exc:
+                        _log_diagnostic_exception(stage, "ct2_model_load_error", exc)
+                        log.warning("CTranslate2 init failed (%s); falling back to PyTorch", exc)
                         NllbTranslator._ct2_translator = None
-
             if NllbTranslator._ct2_translator is None:
                 if NllbTranslator._model is None or NllbTranslator._model_id != model_id:
-                    import torch
-                    from transformers import AutoModelForSeq2SeqLM
-                    NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32, local_files_only=True).to("cpu")
-                    NllbTranslator._model.eval()
-                    NllbTranslator._model_id = model_id
+                    model_start = time.perf_counter()
+                    try:
+                        import torch
+                        from transformers import AutoModelForSeq2SeqLM
+                        _log_diagnostic(stage, "pytorch_model_load_start", model_already_cached=False)
+                        NllbTranslator._model = AutoModelForSeq2SeqLM.from_pretrained(model_id, dtype=torch.float32, local_files_only=True).to("cpu")
+                        NllbTranslator._model.eval()
+                        NllbTranslator._model_id = model_id
+                        _log_diagnostic(stage, "pytorch_model_load_complete", elapsed_ms=round((time.perf_counter() - model_start) * 1000, 3), model_already_cached=False)
+                    except Exception as exc:
+                        _log_diagnostic_exception(stage, "pytorch_model_load_error", exc)
+                        raise
+                else:
+                    _log_diagnostic(stage, "pytorch_model_already_cached", model_already_cached=True)
                 self.model = NllbTranslator._model
-
             if NllbTranslator._tokenizer is None:
-                from transformers import AutoTokenizer
-                NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+                tokenizer_start = time.perf_counter()
+                try:
+                    from transformers import AutoTokenizer
+                    _log_diagnostic(stage, "tokenizer_load_start", tokenizer_already_cached=False, load_path="constructor")
+                    NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+                    _log_diagnostic(stage, "tokenizer_load_complete", elapsed_ms=round((time.perf_counter() - tokenizer_start) * 1000, 3), tokenizer_already_cached=False, load_path="constructor")
+                except Exception as exc:
+                    _log_diagnostic_exception(stage, "tokenizer_load_error", exc, tokenizer_already_cached=False, load_path="constructor")
+                    raise
+            else:
+                _log_diagnostic(stage, "tokenizer_already_cached", tokenizer_already_cached=True, load_path="constructor")
+            _log_diagnostic(stage, "constructor_lock_held_complete", lock_wait_ms=lock_wait_ms, lock_held_ms=round((time.perf_counter() - lock_held_start) * 1000, 3), model_already_cached=bool(NllbTranslator._ct2_translator is not None or NllbTranslator._model is not None), tokenizer_already_cached=NllbTranslator._tokenizer is not None)
+        except Exception as exc:
+            _log_diagnostic_exception(stage, "constructor_error", exc, elapsed_ms=round((time.perf_counter() - constructor_start) * 1000, 3), lock_wait_ms=lock_wait_ms)
+            raise
+        finally:
+            NllbTranslator._lock.release()
+        _log_diagnostic(stage, "constructor_complete", elapsed_ms=round((time.perf_counter() - constructor_start) * 1000, 3), lock_wait_ms=lock_wait_ms, model_already_cached=bool(NllbTranslator._ct2_translator is not None or NllbTranslator._model is not None), tokenizer_already_cached=NllbTranslator._tokenizer is not None)
 
     def translate_batch(self, texts: list[str], source: str, target: str = "km", batch_size: int = 8) -> list[str]:
         if not texts:
@@ -207,45 +328,88 @@ class NllbTranslator:
         source_id = src_map.get(source, "eng_Latn")
         target_code = tgt_map.get(target, "khm_Khmr")
 
-        with NllbTranslator._lock:
+        context = _translation_context.get()
+        stage = "startup_warmup" if context.get("event_kind") == "startup_warmup" else "nllb_translate_batch"
+        batch_start = time.perf_counter()
+        _log_diagnostic(stage, "translate_batch_start", segment_count=len(texts), batch_size=batch_size, model_already_cached=bool(NllbTranslator._ct2_translator is not None or NllbTranslator._model is not None), tokenizer_already_cached=NllbTranslator._tokenizer is not None)
+        lock_wait_start = time.perf_counter()
+        NllbTranslator._lock.acquire()
+        lock_wait_ms = round((time.perf_counter() - lock_wait_start) * 1000, 3)
+        lock_held_start = time.perf_counter()
+        try:
             if NllbTranslator._tokenizer is None:
-                from transformers import AutoTokenizer
-                model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
-                NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+                tokenizer_start = time.perf_counter()
+                try:
+                    from transformers import AutoTokenizer
+                    model_id = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
+                    _log_diagnostic(stage, "tokenizer_load_start", tokenizer_already_cached=False, load_path="lazy")
+                    NllbTranslator._tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+                    _log_diagnostic(stage, "tokenizer_load_complete", elapsed_ms=round((time.perf_counter() - tokenizer_start) * 1000, 3), tokenizer_already_cached=False, load_path="lazy")
+                except Exception as exc:
+                    _log_diagnostic_exception(stage, "tokenizer_load_error", exc, tokenizer_already_cached=False, load_path="lazy")
+                    raise
+            else:
+                _log_diagnostic(stage, "tokenizer_already_cached", tokenizer_already_cached=True, load_path="lazy")
             tokenizer = NllbTranslator._tokenizer
             if getattr(tokenizer, 'src_lang', None) != source_id:
                 tokenizer.src_lang = source_id
+            _log_diagnostic(stage, "translate_lock_setup_complete", lock_wait_ms=lock_wait_ms, lock_held_ms=round((time.perf_counter() - lock_held_start) * 1000, 3), segment_count=len(texts), batch_size=batch_size)
 
             if NllbTranslator._ct2_translator is not None:
                 results_out = []
-                for i in range(0, len(texts), batch_size):
+                for batch_index, i in enumerate(range(0, len(texts), batch_size)):
                     chunk = texts[i:i+batch_size]
-                    tokenized = [tokenizer.convert_ids_to_tokens(tokenizer.encode(t)) for t in chunk]
-                    res_batch = NllbTranslator._ct2_translator.translate_batch(
-                        tokenized,
-                        target_prefix=[[target_code]] * len(chunk),
-                        beam_size=1,
-                        max_decoding_length=160,
-                        no_repeat_ngram_size=3,
-                        max_batch_size=batch_size
-                    )
-                    for r in res_batch:
-                        clean = [t for t in r.hypotheses[0] if t not in {target_code, "</s>"}]
-                        results_out.append(tokenizer.decode(tokenizer.convert_tokens_to_ids(clean)).strip())
+                    inference_start = time.perf_counter()
+                    _log_diagnostic(stage, "ct2_inference_start", batch_index=batch_index, segment_count=len(chunk), batch_size=batch_size)
+                    try:
+                        tokenized = [tokenizer.convert_ids_to_tokens(tokenizer.encode(t)) for t in chunk]
+                        res_batch = NllbTranslator._ct2_translator.translate_batch(
+                            tokenized,
+                            target_prefix=[[target_code]] * len(chunk),
+                            beam_size=1,
+                            max_decoding_length=160,
+                            no_repeat_ngram_size=3,
+                            max_batch_size=batch_size
+                        )
+                        for r in res_batch:
+                            clean = [t for t in r.hypotheses[0] if t not in {target_code, "</s>"}]
+                            results_out.append(tokenizer.decode(tokenizer.convert_tokens_to_ids(clean)).strip())
+                        _log_diagnostic(stage, "ct2_inference_complete", batch_index=batch_index, segment_count=len(chunk), batch_size=batch_size, elapsed_ms=round((time.perf_counter() - inference_start) * 1000, 3))
+                    except Exception as exc:
+                        _log_diagnostic_exception(stage, "ct2_inference_error", exc, batch_index=batch_index, segment_count=len(chunk), batch_size=batch_size, elapsed_ms=round((time.perf_counter() - inference_start) * 1000, 3))
+                        raise
+                _log_diagnostic(stage, "translate_batch_complete", elapsed_ms=round((time.perf_counter() - batch_start) * 1000, 3), segment_count=len(texts), batch_size=batch_size, lock_wait_ms=lock_wait_ms, lock_held_ms=round((time.perf_counter() - lock_held_start) * 1000, 3), model_already_cached=True, tokenizer_already_cached=True)
                 return results_out
+        except Exception as exc:
+            _log_diagnostic_exception(stage, "translate_batch_error", exc, elapsed_ms=round((time.perf_counter() - batch_start) * 1000, 3), segment_count=len(texts), batch_size=batch_size, lock_wait_ms=lock_wait_ms)
+            raise
+        finally:
+            NllbTranslator._lock.release()
 
         import torch
         target_id = tokenizer.convert_tokens_to_ids(target_code)
         results_out = []
-        for i in range(0, len(texts), batch_size):
-            chunk = texts[i:i+batch_size]
-            batch = tokenizer(chunk, padding=True, truncation=True, max_length=256, return_tensors="pt")
-            with torch.inference_mode():
-                result = NllbTranslator._model.generate(
-                    **batch, forced_bos_token_id=target_id, max_new_tokens=160, num_beams=1, no_repeat_ngram_size=3
-                )
-            decoded = tokenizer.batch_decode(result, skip_special_tokens=True)
-            results_out.extend([d.strip() for d in decoded])
+        try:
+            for batch_index, i in enumerate(range(0, len(texts), batch_size)):
+                chunk = texts[i:i+batch_size]
+                batch = tokenizer(chunk, padding=True, truncation=True, max_length=256, return_tensors="pt")
+                inference_start = time.perf_counter()
+                _log_diagnostic(stage, "pytorch_inference_start", batch_index=batch_index, segment_count=len(chunk), batch_size=batch_size)
+                try:
+                    with torch.inference_mode():
+                        result = NllbTranslator._model.generate(
+                            **batch, forced_bos_token_id=target_id, max_new_tokens=160, num_beams=1, no_repeat_ngram_size=3
+                        )
+                    _log_diagnostic(stage, "pytorch_inference_complete", batch_index=batch_index, segment_count=len(chunk), batch_size=batch_size, elapsed_ms=round((time.perf_counter() - inference_start) * 1000, 3))
+                except Exception as exc:
+                    _log_diagnostic_exception(stage, "pytorch_inference_error", exc, batch_index=batch_index, segment_count=len(chunk), batch_size=batch_size, elapsed_ms=round((time.perf_counter() - inference_start) * 1000, 3))
+                    raise
+                decoded = tokenizer.batch_decode(result, skip_special_tokens=True)
+                results_out.extend([d.strip() for d in decoded])
+        except Exception as exc:
+            _log_diagnostic_exception(stage, "translate_batch_error", exc, elapsed_ms=round((time.perf_counter() - batch_start) * 1000, 3), segment_count=len(texts), batch_size=batch_size, lock_wait_ms=lock_wait_ms)
+            raise
+        _log_diagnostic(stage, "translate_batch_complete", elapsed_ms=round((time.perf_counter() - batch_start) * 1000, 3), segment_count=len(texts), batch_size=batch_size, lock_wait_ms=lock_wait_ms, model_already_cached=True, tokenizer_already_cached=True)
         return results_out
 
     def translate(self, text: str, source: str, target: str = "km") -> str:
@@ -389,19 +553,25 @@ def is_models_ready() -> bool:
 
 def warm_models() -> bool:
     global MODELS_READY
-    log.info("Warming pipeline models (Whisper ASR + NLLB CTranslate2)...")
+    token = set_translation_diagnostic_context(None, None, "startup_warmup")
+    warm_start = time.perf_counter()
+    _log_diagnostic("startup_warmup", "warmup_start")
     try:
         asr = WhisperASR(os.getenv("ASR_MODEL", "small"))
         _ = asr.model
         trans = NllbTranslator()
         _ = trans.translate_batch(["SoundMe"], "en", "km")
         MODELS_READY = True
+        _log_diagnostic("startup_warmup", "warmup_complete", elapsed_ms=round((time.perf_counter() - warm_start) * 1000, 3))
         log.info("All pipeline models are warmed and ready.")
         return True
     except Exception as exc:
+        _log_diagnostic_exception("startup_warmup", "warmup_error", exc, elapsed_ms=round((time.perf_counter() - warm_start) * 1000, 3))
         log.warning("Model warming non-fatal error: %s", exc)
         MODELS_READY = False
         return False
+    finally:
+        reset_translation_diagnostic_context(token)
 
 def get_tts_provider_order() -> list[str]:
     custom = os.getenv("TTS_PROVIDER_ORDER")
@@ -477,19 +647,32 @@ class DemoToneTTS:
 
 
 def translate_khmer_batch(texts: list[str], source: str) -> tuple[list[str], str]:
+    start = time.perf_counter()
+    context = _translation_context.get()
+    stage = "startup_warmup" if context.get("event_kind") == "startup_warmup" else "translate_khmer_batch"
+    _log_diagnostic(stage, "wrapper_start", segment_count=len(texts), batch_size=len(texts))
     if not texts:
+        _log_diagnostic(stage, "wrapper_complete", elapsed_ms=0.0, segment_count=0, batch_size=0)
         return [], "none"
     provider = os.getenv("TRANSLATION_PROVIDER", "nllb").strip().lower()
     if provider == "demo":
-        if os.getenv("DEMO_MODE", "").strip().lower() not in {"1", "true", "yes"}:
-            raise RuntimeError("Demo translation requires DEMO_MODE=1.")
-        translator = DemoTranslator()
-        return [translator.translate(t, source) for t in texts], "demo-fixture"
+        try:
+            if os.getenv("DEMO_MODE", "").strip().lower() not in {"1", "true", "yes"}:
+                raise RuntimeError("Demo translation requires DEMO_MODE=1.")
+            translator = DemoTranslator()
+            result = ([translator.translate(t, source) for t in texts], "demo-fixture")
+            _log_diagnostic(stage, "wrapper_complete", elapsed_ms=round((time.perf_counter() - start) * 1000, 3), segment_count=len(texts), batch_size=len(texts), provider="demo-fixture")
+            return result
+        except Exception as exc:
+            _log_diagnostic_exception(stage, "wrapper_error", exc, elapsed_ms=round((time.perf_counter() - start) * 1000, 3), segment_count=len(texts), batch_size=len(texts))
+            raise
     try:
         translated = NllbTranslator().translate_batch(texts, source)
     except Exception as exc:
+        _log_diagnostic_exception(stage, "wrapper_error", exc, elapsed_ms=round((time.perf_counter() - start) * 1000, 3), segment_count=len(texts), batch_size=len(texts))
         raise RuntimeError(f"NLLB translation failed; no fixture fallback is enabled: {exc}") from exc
     p_name = "nllb-ct2-int8" if NllbTranslator._ct2_translator is not None else "nllb-local"
+    _log_diagnostic(stage, "wrapper_complete", elapsed_ms=round((time.perf_counter() - start) * 1000, 3), segment_count=len(texts), batch_size=len(texts), provider=p_name)
     return translated, p_name
 
 

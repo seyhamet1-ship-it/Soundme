@@ -14,6 +14,7 @@ Tests that when DESKTOP_LOCAL_MODE=1 and requests originate from loopback:
 """
 
 import os
+import uuid
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
@@ -25,6 +26,7 @@ def setup_desktop_env(tmp_path, monkeypatch):
     """Configure isolated environment for desktop local testing."""
     monkeypatch.setenv("DESKTOP_LOCAL_MODE", "1")
     monkeypatch.setenv("JOB_DB", str(tmp_path / "test_jobs.sqlite3"))
+    monkeypatch.setattr("app.storage.DB", tmp_path / "test_jobs.sqlite3")
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("OUTPUT_DIR", str(tmp_path / "outputs"))
     (tmp_path / "uploads").mkdir(parents=True, exist_ok=True)
@@ -46,7 +48,7 @@ def test_desktop_local_full_workflow_without_token(tmp_path):
     assert me_data["auth_mode"] == "desktop_local"
 
     # 2. Seed a mock job owned by desktop:local
-    job_id = "a" * 32
+    job_id = uuid.uuid4().hex
     # Ensure paths are within ROOT (project root) so the traversal check passes
     from app.api import ROOT
     output_dir = ROOT / "outputs" / job_id

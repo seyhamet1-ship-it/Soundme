@@ -46,7 +46,7 @@ for (const p of possibleBuilderPaths) {
 }
 
 console.log(`[Builder] Step 3: Packaging Windows installer using: ${builderBin}`);
-const builderArgs = ['--win', 'nsis', '--config', 'electron-builder.json'];
+const builderArgs = ['--win', 'nsis', 'dir', '--config', 'electron-builder.json'];
 
 // On Windows with spaces in path, quote the executable
 const quotedBin = `"${builderBin}"`;

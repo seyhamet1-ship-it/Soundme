@@ -1,0 +1,65 @@
+{
+  "appId": "com.soundme.ai",
+  "productName": "Soundme AI",
+  "copyright": "Copyright © 2026 Soundme AI",
+  "electronVersion": "45.0.0",
+  "directories": {
+    "output": "release",
+    "buildResources": "desktop"
+  },
+  "asarUnpack": [
+    "app/**/*",
+    "frontend/dist/**/*",
+    "sitecustomize.py"
+  ],
+  "files": [
+    "desktop/**/*",
+    "frontend/dist/**/*",
+    "app/**/*",
+    "package.json",
+    "requirements.txt",
+    "sitecustomize.py",
+    "!**/*.pyc",
+    "!**/__pycache__/**",
+    "!**/node_modules/**",
+    "!**/.venv*/**",
+    "!uploads/**",
+    "!outputs/**",
+    "!*.sqlite3",
+    "!*.log",
+    "!*.err",
+    "!*.mp4",
+    "!*.mp3",
+    "!.env*",
+    "!tests/**",
+    "!docs/**",
+    "!tools/models/**"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "dir",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "desktop/icon.ico",
+    "artifactName": "Soundme-AI-Setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Soundme AI",
+    "uninstallDisplayName": "Soundme AI"
+  }
+}

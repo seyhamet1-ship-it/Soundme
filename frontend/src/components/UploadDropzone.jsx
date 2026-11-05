@@ -12,7 +12,7 @@ export default function UploadDropzone({ file, onFileSelect, onDrop }) {
     <div className="glass-panel p-6">
       <div className="mb-5">
         <p className="text-xs font-medium uppercase tracking-[0.2em] text-sky-400">New Project</p>
-        <h2 className="mt-2 text-3xl font-bold text-white">Upload a short video</h2>
+        <h2 className="mt-2 text-3xl font-bold text-white">Upload a video</h2>
       </div>
 
       <label
@@ -39,7 +39,7 @@ export default function UploadDropzone({ file, onFileSelect, onDrop }) {
 
         <div className="text-lg font-semibold text-white">Drop a video here or click to browse</div>
         <div className="mt-2 text-sm text-slate-400">
-          Supported: {supportedFormats.join(', ')} • Max 2048 MB
+          Supported: {supportedFormats.join(', ')} · Max 500 MB · Up to 125 min
         </div>
 
         {file && (

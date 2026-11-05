@@ -91,6 +91,10 @@ STRINGS: dict[str, I18nEntry] = {
         km="ពិនិត្យការបកប្រែ",
         en="Review translation",
     ),
+    "translation_review_required": I18nEntry(
+        km="តម្រូវឲ្យពិនិត្យការបកប្រែ",
+        en="Translation review required",
+    ),
     "save_and_continue": I18nEntry(
         km="រក្សាទុក ហើយបន្ត",
         en="Save and continue",

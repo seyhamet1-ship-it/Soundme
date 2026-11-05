@@ -1,0 +1,13 @@
+{
+  "name": "soundme-ai-desktop",
+  "version": "1.0.0",
+  "description": "Soundme AI - Khmer Video Dubbing Studio Desktop Application",
+  "main": "desktop/main.cjs",
+  "author": "Soundme AI Team",
+  "scripts": {
+    "build:frontend": "npm --prefix frontend run build",
+    "desktop:start": "node desktop/run.cjs",
+    "desktop:dev": "node desktop/run.cjs",
+    "desktop:dist": "node desktop/build.cjs"
+  }
+}

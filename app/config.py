@@ -60,7 +60,7 @@ FRONTEND_DIR = BASE_DIR / "frontend"
 
 MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB") or os.getenv("MAX_UPLOAD_MB", "500"))
 MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
-MAX_DURATION_MIN = int(os.getenv("MAX_DURATION_MIN", "10"))
+MAX_DURATION_MIN = int(os.getenv("MAX_DURATION_MIN", "125"))
 MAX_VIDEO_SECONDS = MAX_DURATION_MIN * 60 if MAX_DURATION_MIN > 0 else 0
 SUPPORTED_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Soundme AI - Loading</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background: #020617;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    .card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 16px;
+      padding: 2.5rem 3rem;
+      width: 440px;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 40px rgba(56, 189, 248, 0.08);
+      position: relative;
+    }
+    .card::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 15%;
+      right: 15%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+    }
+    .icon-container {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 1.5rem;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(16, 185, 129, 0.2));
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 24px rgba(56, 189, 248, 0.2);
+    }
+    .icon-container svg {
+      width: 32px;
+      height: 32px;
+      stroke: #38bdf8;
+    }
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.25rem;
+      color: #ffffff;
+    }
+    .subtitle {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      margin-bottom: 2rem;
+    }
+    .progress-bar-bg {
+      background: rgba(30, 41, 59, 0.8);
+      border-radius: 9999px;
+      height: 6px;
+      width: 100%;
+      overflow: hidden;
+      margin-bottom: 1.25rem;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 30%;
+      background: linear-gradient(90deg, #0ea5e9, #10b981);
+      border-radius: 9999px;
+      animation: indeterminate 2s infinite ease-in-out;
+    }
+    @keyframes indeterminate {
+      0% {
+        transform: translateX(-100%) scaleX(0.2);
+      }
+      50% {
+        transform: translateX(100%) scaleX(0.7);
+      }
+      100% {
+        transform: translateX(300%) scaleX(0.2);
+      }
+    }
+    .status-text {
+      font-size: 0.85rem;
+      color: #38bdf8;
+      font-weight: 500;
+      min-height: 1.3rem;
+    }
+    .detail-text {
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-top: 0.5rem;
+      min-height: 1rem;
+    }
+    .error-box {
+      display: none;
+      margin-top: 1.5rem;
+      padding: 1rem;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      color: #fca5a5;
+      font-size: 0.8rem;
+      text-align: left;
+    }
+    .error-box pre {
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin-top: 0.5rem;
+      max-height: 120px;
+      overflow-y: auto;
+      font-size: 0.72rem;
+      color: #cbd5e1;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 1rem;
+      padding: 0.5rem 1.25rem;
+      background: #0ea5e9;
+      color: #fff;
+      font-weight: 600;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s;
+    }
+    .btn:hover {
+      background: #0284c7;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-container">
+      <svg viewBox="0 0 24 24" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+        <line x1="12" y1="19" x2="12" y2="22" />
+      </svg>
+    </div>
+    <h1>Soundme AI</h1>
+    <p class="subtitle">Khmer Video Dubbing Studio</p>
+
+    <div class="progress-bar-bg" id="progressBar">
+      <div class="progress-bar-fill"></div>
+    </div>
+
+    <div class="status-text" id="statusText">Initializing application...</div>
+    <div class="detail-text" id="detailText">Checking AI services</div>
+
+    <div class="error-box" id="errorBox">
+      <strong>Startup Issue Encountered</strong>
+      <div id="errorMessage"></div>
+      <pre id="errorDetail"></pre>
+      <button class="btn" id="retryBtn" onclick="window.soundmeDesktop?.getBackendStatus()">Retry</button>
+    </div>
+  </div>
+
+  <script>
+    if (window.soundmeDesktop && window.soundmeDesktop.onStatusUpdate) {
+      window.soundmeDesktop.onStatusUpdate((data) => {
+        const statusEl = document.getElementById('statusText');
+        const detailEl = document.getElementById('detailText');
+        const errorBox = document.getElementById('errorBox');
+        const progressBar = document.getElementById('progressBar');
+
+        if (data.status) {
+          statusEl.textContent = data.status;
+        }
+        if (data.detail) {
+          detailEl.textContent = data.detail;
+        }
+        if (data.error) {
+          errorBox.style.display = 'block';
+          progressBar.style.display = 'none';
+          document.getElementById('errorMessage').textContent = data.error;
+          document.getElementById('errorDetail').textContent = data.detail || '';
+        }
+      });
+    }
+  </script>
+</body>
+</html>

@@ -44,6 +44,22 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
  ctr.setdefault("tts_computed", 0)
  from app.long_video import compute_content_hash, get_cached_segment_audio, store_cached_segment_audio
 
+ # Early translation-validity guard: pause for review before any TTS/voice work
+ for idx, seg in enumerate(segments):
+  _text_km = getattr(seg, 'text_km', None) or (seg.get('text_km') if isinstance(seg, dict) else '')
+  _src_text = getattr(seg, 'source_text', None) or (seg.get('source_text') if isinstance(seg, dict) else None)
+  if not _text_km or not str(_text_km).strip():
+   raise ValueError('Khmer translation is empty.')
+  if providers[idx].startswith('nllb') and not is_khmer_text(_text_km) and not is_passthrough_text(_src_text, _text_km):
+   from app.i18n import get_km
+   update_job(job_id, status="awaiting_review", stage="review", progress=50,
+     error={"code": "REVIEW_REQUIRED", "message_en": "Translation provider returned non-Khmer text.",
+       "message_km": get_km("translation_review_required")},
+     segments=[x.__dict__ if hasattr(x, "__dict__") else x for x in segments],
+     providers=providers,
+     timing_review={"review_type": "translation", "reason": "non_khmer_translation"})
+   return
+
  t_tts = time.time()
  speech=[]; tts=[]; fit_stats=[]; prev_end=0.0; demo_audio=False; update_job(job_id,stage="voice",progress=54)
 
@@ -59,10 +75,17 @@ def render(job_id:str,source:Path,root:Path,segments:list[Segment],duration:floa
    return
   text_km = getattr(s, 'text_km', None) or (s.get('text_km') if isinstance(s, dict) else '')
   if not text_km or not str(text_km).strip():
-   raise ValueError('Khmer translation is empty.')
+    raise ValueError('Khmer translation is empty.')
   src_text = getattr(s, 'source_text', None) or (s.get('source_text') if isinstance(s, dict) else None)
   if providers[idx].startswith('nllb') and not is_khmer_text(text_km) and not is_passthrough_text(src_text, text_km):
-   raise ValueError('Translation provider returned non-Khmer text.')
+    from app.i18n import get_km
+    update_job(job_id, status="awaiting_review", stage="review", progress=50,
+      error={"code": "REVIEW_REQUIRED", "message_en": "Translation provider returned non-Khmer text.",
+        "message_km": get_km("translation_review_required")},
+      segments=[x.__dict__ if hasattr(x, "__dict__") else x for x in segments],
+      providers=providers,
+      timing_review={"review_type": "translation", "reason": "non_khmer_translation"})
+    return
   slot = max(.2, s.end - s.start)
   out = root / f"voice-{idx:04}.wav"
   content_h = compute_content_hash(text_km, voice, slot)
