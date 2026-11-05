@@ -25,3 +25,14 @@ tests/scratch/
 *.log
 release/
 desktop_data/
+
+# Scratch, diagnostics, and build dumps
+artifacts/
+scratch/
+diagnostics/
+*.err
+*.out
+*.bak*
+
+# Third-party tools
+tools/cloudflared.exe
